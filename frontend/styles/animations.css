@@ -1,0 +1,97 @@
+/*
+ * styles/animations.css — Keyframe definitions for Prism UI animations.
+ *
+ * These keyframes are registered in globals.css @theme so they are accessible
+ * as Tailwind utility classes (animate-fade-slide-up, animate-lime-pulse, etc.).
+ * Direct utility classes are also defined here as a reliable fallback for
+ * Tailwind v4 @theme inline compatibility.
+ */
+
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes limePulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(163, 230, 53, 0);
+    border-color: rgba(163, 230, 53, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(163, 230, 53, 0.12),
+      inset 0 0 20px rgba(163, 230, 53, 0.05);
+    border-color: rgba(163, 230, 53, 1);
+  }
+}
+
+@keyframes arcSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes statusPing {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  75%,
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes glowPulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ── Direct animation utility classes ───────────────────────────────────────
+ * Defined here as reliable fallback in case @theme inline in globals.css
+ * does not emit Tailwind animation utilities in this Tailwind v4 setup.
+ */
+
+.animate-fade-slide-up {
+  animation: fadeSlideUp 0.4s ease forwards;
+}
+
+.animate-lime-pulse {
+  animation: limePulse 2s ease-in-out infinite;
+}
+
+.animate-arc-spin {
+  animation: arcSpin 25s linear infinite;
+}
+
+.animate-status-ping {
+  animation: statusPing 1.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.animate-glow-pulse {
+  animation: glowPulse 3s ease-in-out infinite;
+}

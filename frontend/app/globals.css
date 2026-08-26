@@ -1,0 +1,121 @@
+/* globals.css — Tailwind v4 base + Prism design system */
+
+@import "tailwindcss";
+@import "../styles/tokens.css";
+@import "../styles/animations.css";
+
+/* ── Tailwind v4 theme extension ────────────────────────────────────────────
+ * Maps CSS custom properties (tokens.css) to Tailwind color / animation utilities.
+ * No hex values here — all values defer to tokens.css via var().
+ */
+@theme inline {
+  /* Colors */
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-card: var(--bg-card);
+  --color-bg-sidebar: var(--bg-sidebar);
+  --color-bg-panel: var(--bg-panel);
+  --color-bg-input: var(--bg-input);
+  --color-bg-hover: var(--bg-hover);
+  --color-accent-lime: var(--accent-lime);
+  --color-accent-lime-muted: var(--accent-lime-muted);
+  --color-accent-lime-dim: var(--accent-lime-dim);
+  --color-accent-glow: var(--accent-glow);
+  --color-border-glow: var(--border-glow);
+  --color-border-subtle: var(--border-subtle);
+  --color-panel-border: var(--panel-border);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-dim: var(--text-dim);
+  --color-text-accent: var(--text-accent);
+  --color-status-running: var(--status-running);
+  --color-status-complete: var(--status-complete);
+  --color-status-error: var(--status-error);
+  --color-status-pending: var(--status-pending);
+  --color-status-awaiting: var(--status-awaiting);
+  --color-hitl-border: var(--hitl-border);
+  --color-complexity-low: var(--complexity-low);
+  --color-complexity-medium: var(--complexity-medium);
+  --color-complexity-high: var(--complexity-high);
+  --color-confidence-low: var(--confidence-low);
+  --color-confidence-mid: var(--confidence-mid);
+  --color-confidence-high: var(--confidence-high);
+
+  /* Font families */
+  --font-sans: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Animations */
+  --animate-fade-slide-up: fadeSlideUp 0.4s ease forwards;
+  --animate-lime-pulse: limePulse 2s ease-in-out infinite;
+  --animate-arc-spin: arcSpin 25s linear infinite;
+  --animate-status-ping: statusPing 1.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  --animate-glow-pulse: glowPulse 3s ease-in-out infinite;
+}
+
+/* ── Base styles ────────────────────────────────────────────────────────────── */
+
+html {
+  font-size: 20px;
+  height: 100%;
+  background-color: var(--bg-primary);
+  color-scheme: dark;
+}
+
+body {
+  height: 100%;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Custom scrollbars ──────────────────────────────────────────────────────── */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 2px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* ── Input placeholder ──────────────────────────────────────────────────────── */
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+/* ── Selection ──────────────────────────────────────────────────────────────── */
+
+::selection {
+  background: var(--accent-glow);
+  color: var(--accent-lime);
+}
+
+/* ── Keyframe safety net ─────────────────────────────────────────────────────
+ * Defined here directly so arcSpin (used via inline style in PrismBackground)
+ * is guaranteed available regardless of @import processing order in Turbopack.
+ */
+
+@keyframes arcSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

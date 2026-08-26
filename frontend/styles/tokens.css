@@ -1,0 +1,81 @@
+/*
+ * styles/tokens.css — SINGLE SOURCE OF TRUTH for all color and visual tokens.
+ *
+ * RULE: Every hex value, rgba(), and design constant in the Prism frontend lives
+ * here and ONLY here. All other files reference these via var(--token-name).
+ * No hex or rgb() values are permitted anywhere else in the codebase.
+ */
+
+:root {
+  /* ── Base backgrounds ─────────────────────────────────────────────────────── */
+  --bg-primary: #0a0d08;
+  --bg-card: rgba(18, 24, 15, 0.65);
+  --bg-sidebar: rgba(12, 16, 10, 0.85);
+  --bg-panel: rgba(14, 20, 12, 0.75);
+  --bg-input: rgba(18, 24, 15, 0.9);
+  --bg-hover: rgba(163, 230, 53, 0.06);
+  --bg-active: rgba(163, 230, 53, 0.1);
+
+  /* ── Accent / brand ───────────────────────────────────────────────────────── */
+  --accent-lime: #a3e635;
+  --accent-lime-muted: #84cc16;
+  --accent-lime-dim: #4d7a0a;
+  --accent-glow: rgba(163, 230, 53, 0.15);
+  --accent-glow-strong: rgba(163, 230, 53, 0.3);
+
+  /* ── Borders ─────────────────────────────────────────────────────────────── */
+  --border-glow: rgba(163, 230, 53, 0.25);
+  --border-subtle: rgba(163, 230, 53, 0.12);
+  --border-dim: rgba(255, 255, 255, 0.06);
+  --panel-border: rgba(163, 230, 53, 0.12);
+
+  /* ── HITL checkpoint ─────────────────────────────────────────────────────── */
+  --hitl-border: #a3e635;
+  --hitl-glow: rgba(163, 230, 53, 0.2);
+
+  /* ── Typography ──────────────────────────────────────────────────────────── */
+  --text-primary: rgba(255, 255, 255, 0.92);
+  --text-secondary: rgba(255, 255, 255, 0.55);
+  --text-dim: rgba(255, 255, 255, 0.3);
+  --text-accent: #a3e635;
+  --text-muted: rgba(255, 255, 255, 0.18);
+
+  /* ── Agent status indicators ─────────────────────────────────────────────── */
+  --status-running: #a3e635;
+  --status-complete: #34d399;
+  --status-error: #f87171;
+  --status-pending: rgba(255, 255, 255, 0.25);
+  --status-skipped: rgba(255, 255, 255, 0.18);
+  --status-awaiting: #fbbf24;
+
+  /* ── Complexity badges ───────────────────────────────────────────────────── */
+  --complexity-low: #34d399;
+  --complexity-medium: #fbbf24;
+  --complexity-high: #f87171;
+
+  /* ── Scrollbar ───────────────────────────────────────────────────────────── */
+  --scrollbar-track: #0a0d08;
+  --scrollbar-thumb: rgba(163, 230, 53, 0.18);
+  --scrollbar-thumb-hover: rgba(163, 230, 53, 0.35);
+
+  /* ── Confidence bar ──────────────────────────────────────────────────────── */
+  --confidence-low: #f87171;
+  --confidence-mid: #fbbf24;
+  --confidence-high: #34d399;
+
+  /* ── Glass / blur cards ──────────────────────────────────────────────────── */
+  --glass-blur: blur(12px);
+  --glass-border: rgba(163, 230, 53, 0.15);
+
+  /* ── Danger / destructive actions ───────────────────────────────────────── */
+  --danger-text: #f87171;
+  --danger-border: rgba(248, 113, 113, 0.3);
+  --danger-bg: rgba(248, 113, 113, 0.1);
+  --danger-bg-hover: rgba(248, 113, 113, 0.2);
+
+  /* ── Shadow / glow ───────────────────────────────────────────────────────── */
+  --glow-lime-sm: 0 0 8px rgba(163, 230, 53, 0.25);
+  --glow-lime-md: 0 0 16px rgba(163, 230, 53, 0.3);
+  --glow-lime-lg: 0 0 32px rgba(163, 230, 53, 0.2);
+  --card-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
