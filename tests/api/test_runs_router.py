@@ -35,7 +35,10 @@ def test_client():
         )),
     ):
         from backend.main import app
-        with TestClient(app, raise_server_exceptions=False) as client:
+        with (
+            patch("backend.routers.runs.get_compiled_graph", new=AsyncMock(return_value=MagicMock())),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
             yield client
 
 

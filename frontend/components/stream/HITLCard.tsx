@@ -13,7 +13,7 @@
 
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import {
   CheckCheck,
@@ -360,6 +360,16 @@ export default function HITLCard({
 
   const isHitl1 = checkpoint === "hitl_1";
 
+  useEffect(() => {
+    if (initialSubtasks.length === 0) return;
+    setEditedSubtasks((prev) => (prev.length === 0 ? initialSubtasks : prev));
+  }, [initialSubtasks]);
+
+  useEffect(() => {
+    if (initialPlan.length === 0) return;
+    setEditedPlan((prev) => (prev.length === 0 ? initialPlan : prev));
+  }, [initialPlan]);
+
   async function handleApprove() {
     if (approveInFlightRef.current || loading) return;
     if (!pat) {
@@ -435,6 +445,12 @@ export default function HITLCard({
           : "Review and edit the implementation plan. Approve to run tests in the sandbox."}
       </p>
 
+      {isHitl1 && editedSubtasks.length === 0 && (
+        <p className="text-xs mb-3" style={{ color: "var(--text-dim)" }}>
+          Loading subtasks from the planner…
+        </p>
+      )}
+
       {/* Editor */}
       <div className="mb-4 max-h-80 overflow-y-auto">
         {isHitl1 ? (
@@ -468,7 +484,11 @@ export default function HITLCard({
           variant="primary"
           size="sm"
           loading={loading}
-          disabled={loading || !pat}
+          disabled={
+            loading ||
+            !pat ||
+            (isHitl1 && editedSubtasks.length === 0)
+          }
           onClick={handleApprove}
           className="flex-1"
         >
@@ -485,6 +505,11 @@ export default function HITLCard({
           Stop
         </Button>
       </div>
+      {!pat && (
+        <p className="text-xs mt-2" style={{ color: "var(--text-dim)" }}>
+          Re-enter your GitHub PAT in the left panel to enable Approve.
+        </p>
+      )}
     </div>
   );
 }

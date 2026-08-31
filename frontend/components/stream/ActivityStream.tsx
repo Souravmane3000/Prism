@@ -39,6 +39,8 @@ interface ActivityStreamProps {
   runStatus: RunRow | null;
   agentOutputs: AgentOutputRow[];
   checkpointPayload: CheckpointRow | null;
+  outputSubtasks?: Subtask[];
+  outputPlan?: ImplementationPlanItem[];
   pat: string;
   approvedCheckpoint: string | null; // Which checkpoint was just approved (to hide its card)
   onApproved: (checkpoint: string) => void;
@@ -93,11 +95,57 @@ function buildAgentMap(
   return map;
 }
 
+function isTerminalStatus(status: RunRow["status"] | undefined): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+function shouldRenderHitlCard(
+  agent: AgentName,
+  runStatus: RunRow | null,
+  checkpointPayload: CheckpointRow | null,
+  approvedCheckpoint: string | null,
+  agentMap: Map<
+    AgentName,
+    { startRow?: AgentOutputRow; completeRow?: AgentOutputRow }
+  >,
+): boolean {
+  if (agent !== "hitl_1" && agent !== "hitl_2") return false;
+  if (approvedCheckpoint === agent) return false;
+  if (isTerminalStatus(runStatus?.status)) return false;
+
+  if (
+    runStatus?.status === "awaiting_approval" &&
+    (!runStatus.current_agent || runStatus.current_agent === agent)
+  ) {
+    return true;
+  }
+  if (runStatus?.current_agent === agent) return true;
+  if (
+    checkpointPayload?.checkpoint_name === agent &&
+    checkpointPayload.user_decision == null
+  ) {
+    return true;
+  }
+
+  if (agent === "hitl_1") {
+    return (
+      !!agentMap.get("planner")?.completeRow &&
+      !agentMap.get("code_navigator")
+    );
+  }
+  return (
+    !!agentMap.get("impl_planner")?.completeRow &&
+    !agentMap.get("test_runner")
+  );
+}
+
 export default function ActivityStream({
   runId,
   runStatus,
   agentOutputs,
   checkpointPayload,
+  outputSubtasks = [],
+  outputPlan = [],
   pat,
   approvedCheckpoint,
   onApproved,
@@ -143,14 +191,18 @@ export default function ActivityStream({
   }
 
   const agentMap = buildAgentMap(agentOutputs);
-  const isAwaiting = runStatus?.status === "awaiting_approval";
-  const activeCheckpoint = runStatus?.current_agent as AgentName | undefined;
 
   // Collect agents that have seen any output (start or complete)
   const seenAgents = new Set(agentOutputs.map((r) => r.agent));
   // Also include the currently-running agent (may have only start emitted)
   if (runStatus?.current_agent) {
     seenAgents.add(runStatus.current_agent as AgentName);
+  }
+  if (shouldRenderHitlCard("hitl_1", runStatus, checkpointPayload, approvedCheckpoint, agentMap)) {
+    seenAgents.add("hitl_1");
+  }
+  if (shouldRenderHitlCard("hitl_2", runStatus, checkpointPayload, approvedCheckpoint, agentMap)) {
+    seenAgents.add("hitl_2");
   }
 
   // Filter pipeline to only agents that have appeared
@@ -200,15 +252,20 @@ export default function ActivityStream({
           // Only hide if THIS SPECIFIC checkpoint was just approved (not a different one)
           const wasJustApproved = approvedCheckpoint === agent;
           if (
-            isAwaiting &&
             !wasJustApproved &&
-            activeCheckpoint === agent &&
-            (agent === "hitl_1" || agent === "hitl_2")
+            shouldRenderHitlCard(
+              agent,
+              runStatus,
+              checkpointPayload,
+              approvedCheckpoint,
+              agentMap,
+            )
           ) {
             const cpPayload = checkpointPayload?.payload ?? {};
             const rawSubtasks =
               (cpPayload.subtasks as unknown[] | undefined) ??
               (completePayload.subtasks as unknown[] | undefined) ??
+              (outputSubtasks as unknown[]) ??
               [];
             const subtasks: Subtask[] = Array.isArray(rawSubtasks)
               ? rawSubtasks.map(normSubtask)
@@ -216,6 +273,7 @@ export default function ActivityStream({
             const rawPlan =
               (cpPayload.implementation_plan as unknown[] | undefined) ??
               (completePayload.implementation_plan as unknown[] | undefined) ??
+              (outputPlan as unknown[]) ??
               [];
             const implPlan = rawPlan as ImplementationPlanItem[];
 

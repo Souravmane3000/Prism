@@ -48,6 +48,21 @@ from backend.supabase_client import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 _GRAPH_TRANSIENT_ATTEMPTS = 3
+_HITL_NODES = frozenset({"hitl_1", "hitl_2"})
+
+
+def _paused_hitl_node(snapshot: Any) -> Optional[str]:
+    """Return hitl_1/hitl_2 if the graph is stopped at that interrupt_before node."""
+    nxt = getattr(snapshot, "next", None)
+    if not nxt:
+        return None
+    try:
+        name = nxt[0]
+    except (TypeError, IndexError, KeyError):
+        return None
+    if name in _HITL_NODES:
+        return str(name)
+    return None
 
 
 async def _astream_with_retry(
@@ -61,14 +76,47 @@ async def _astream_with_retry(
 
     After the first failure, subsequent attempts pass None so LangGraph
     resumes from the Postgres checkpoint instead of restarting the thread.
+
+    interrupt_before=["hitl_1", "hitl_2"] can leave astream blocked on the next
+    iteration waiting for a node that will never run. After each yielded chunk
+    we read aget_state and return as soon as the next node is a HITL gate.
     """
     pending: Any = input_state
     for attempt in range(1, _GRAPH_TRANSIENT_ATTEMPTS + 1):
         try:
             async for _chunk in graph.astream(pending, config, stream_mode="values"):
-                pass
+                try:
+                    snapshot = await graph.aget_state(config)
+                except Exception:
+                    logger.warning(
+                        "[runs] aget_state during astream failed — run_id=%s",
+                        run_id,
+                        exc_info=True,
+                    )
+                    continue
+                paused = _paused_hitl_node(snapshot)
+                if paused:
+                    logger.info(
+                        "[runs] astream reached HITL boundary — run_id=%s next=%s",
+                        run_id,
+                        paused,
+                    )
+                    return
             return
         except Exception as exc:
+            try:
+                snapshot = await graph.aget_state(config)
+                paused = _paused_hitl_node(snapshot)
+                if paused:
+                    logger.info(
+                        "[runs] astream interrupted at HITL — run_id=%s next=%s err=%s",
+                        run_id,
+                        paused,
+                        type(exc).__name__,
+                    )
+                    return
+            except Exception:
+                pass
             if not is_transient_http_error(exc) or attempt == _GRAPH_TRANSIENT_ATTEMPTS:
                 raise
             logger.warning(
@@ -365,6 +413,36 @@ async def _handle_hitl_pause(
     logger.info("[runs] _handle_hitl_pause COMPLETED — checkpoint=%s run_id=%s", checkpoint_name, run_id)
 
 
+async def _reconcile_hitl_pause(run_id: str, run: dict[str, Any]) -> dict[str, Any]:
+    """
+    If LangGraph is paused at HITL but runs.status was never flipped (astream
+    hang, timeout, or missed handler), write the pause records now.
+
+    Called from GET /status and GET /output so a stuck run heals when the UI polls.
+    """
+    if run.get("status") in ("awaiting_approval", "completed", "cancelled", "failed"):
+        return run
+    try:
+        graph = await get_compiled_graph()
+        snapshot = await graph.aget_state({"configurable": {"thread_id": run_id}})
+        paused = _paused_hitl_node(snapshot)
+        if not paused:
+            return run
+        values = getattr(snapshot, "values", None)
+        state_values = dict(values) if isinstance(values, dict) else {}
+        logger.info(
+            "[runs] Reconciling missed HITL pause — run_id=%s checkpoint=%s",
+            run_id,
+            paused,
+        )
+        await _handle_hitl_pause(run_id, paused, state_values)
+        updated = await get_run(run_id)
+        return updated or run
+    except Exception as exc:
+        logger.warning("[runs] HITL reconcile skipped for %s: %s", run_id, exc)
+        return run
+
+
 async def _run_graph_background(
     run_id: str,
     initial_state: PrismState,
@@ -392,9 +470,11 @@ async def _run_graph_background(
         logger.info("[runs] graph.astream ended — run_id=%s", run_id)
 
         snapshot = await graph.aget_state(config)
+        paused = _paused_hitl_node(snapshot)
         logger.info("[runs] aget_state snapshot.next=%s — run_id=%s", snapshot.next, run_id)
-        if snapshot.next and snapshot.next[0] in ("hitl_1", "hitl_2"):
-            await _handle_hitl_pause(run_id, snapshot.next[0], dict(snapshot.values))
+        if paused:
+            values = dict(snapshot.values) if isinstance(snapshot.values, dict) else {}
+            await _handle_hitl_pause(run_id, paused, values)
         else:
             logger.info("[runs] Graph stream completed — run_id=%s", run_id)
     except Exception as exc:
@@ -435,8 +515,10 @@ async def _resume_graph_background(run_id: str, github_token: str) -> None:
         await _astream_with_retry(graph, None, config, run_id)
 
         snapshot = await graph.aget_state(config)
-        if snapshot.next and snapshot.next[0] in ("hitl_1", "hitl_2"):
-            await _handle_hitl_pause(run_id, snapshot.next[0], dict(snapshot.values))
+        paused = _paused_hitl_node(snapshot)
+        if paused:
+            values = dict(snapshot.values) if isinstance(snapshot.values, dict) else {}
+            await _handle_hitl_pause(run_id, paused, values)
         else:
             logger.info("[runs] Graph resumed and completed — run_id=%s", run_id)
     except Exception as exc:
@@ -537,6 +619,8 @@ async def get_run_status(run_id: str) -> RunStatusResponse:
     if run is None:
         raise _error_response("not_found", f"Run {run_id} not found", status.HTTP_404_NOT_FOUND, run_id)
 
+    run = await _reconcile_hitl_pause(run_id, run)
+
     return RunStatusResponse(
         run_id=run_id,
         status=run.get("status", "unknown"),
@@ -571,6 +655,8 @@ async def get_run_output(run_id: str) -> RunOutputResponse:
 
     if run is None:
         raise _error_response("not_found", f"Run {run_id} not found", status.HTTP_404_NOT_FOUND, run_id)
+
+    run = await _reconcile_hitl_pause(run_id, run)
 
     state_snapshot = await _materialize_run_state(run_id, outputs)
     all_tests_passed = run.get("all_tests_passed")
@@ -633,6 +719,8 @@ async def approve_run(
     if run is None:
         raise _error_response("not_found", f"Run {run_id} not found", status.HTTP_404_NOT_FOUND, run_id)
 
+    run = await _reconcile_hitl_pause(run_id, run)
+
     if run.get("status") != "awaiting_approval":
         raise _error_response(
             "invalid_state",
@@ -669,12 +757,15 @@ async def approve_run(
             message=msg,
         )
 
+    next_agent = "code_navigator" if body.checkpoint == "hitl_1" else "test_runner"
+
     # ── Resolve checkpoint in DB (HITL node code after interrupt() is unreachable) ──
     try:
         await resolve_checkpoint(run_id, body.checkpoint, {"action": body.action})
         await save_agent_output(run_id, body.checkpoint, {"action": body.action}, "complete")
-        # Clear any stale error when resuming
-        await update_run_status(run_id, "running", body.checkpoint, error="")
+        # Advance current_agent past the HITL node so the UI does not keep
+        # showing Checkpoint 1 as the active running step.
+        await update_run_status(run_id, "running", next_agent, error="")
     except Exception as exc:
         logger.warning(
             "[runs] Could not resolve checkpoint %s for run %s: %s",
@@ -713,8 +804,6 @@ async def approve_run(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             run_id,
         )
-
-    next_agent = "code_navigator" if body.checkpoint == "hitl_1" else "test_runner"
     # github_token is passed here so agents after resume can access it via config
     background_tasks.add_task(_resume_graph_background, run_id, body.github_token)
 

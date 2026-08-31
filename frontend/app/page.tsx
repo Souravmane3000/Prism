@@ -62,26 +62,30 @@ export default function PrismWorkspace() {
   const { runStatus, agentOutputs, checkpointPayload, isConnected, transport } =
     useSupabaseRealtime(activeRunId);
 
-  // Reset approvedCheckpoint when:
-  // 1. Status changes away from awaiting_approval (pipeline resumed)
-  // 2. Current agent changes to a different checkpoint (now at a new HITL)
-  useEffect(() => {
-    if (runStatus?.status && runStatus.status !== "awaiting_approval") {
-      setApprovedCheckpoint(null);
-    }
-  }, [runStatus?.status]);
-
-  // Also reset if we're now at a different checkpoint than the one we approved
+  // Keep approvedCheckpoint until a later agent starts so the HITL card
+  // does not flash back while status is still "running".
   useEffect(() => {
     if (
       approvedCheckpoint &&
       runStatus?.current_agent &&
       runStatus.current_agent !== approvedCheckpoint &&
-      (runStatus.current_agent === "hitl_1" || runStatus.current_agent === "hitl_2")
+      runStatus.current_agent !== "hitl_1" &&
+      runStatus.current_agent !== "hitl_2"
     ) {
       setApprovedCheckpoint(null);
     }
   }, [runStatus?.current_agent, approvedCheckpoint]);
+
+  useEffect(() => {
+    if (runStatus?.status === "awaiting_approval" && activeRunId) {
+      getRunOutput(activeRunId)
+        .then((output) => {
+          setRunOutput(output);
+          if (output.pr_url) setPrUrl(output.pr_url);
+        })
+        .catch(() => {});
+    }
+  }, [runStatus?.status, activeRunId]);
 
   // Refresh full output whenever new complete events arrive
   useEffect(() => {
@@ -224,6 +228,8 @@ export default function PrismWorkspace() {
               runStatus={runStatus}
               agentOutputs={agentOutputs}
               checkpointPayload={checkpointPayload}
+              outputSubtasks={runOutput?.subtasks ?? []}
+              outputPlan={runOutput?.implementation_plan ?? []}
               pat={pat}
               approvedCheckpoint={approvedCheckpoint}
               onApproved={handleApproved}

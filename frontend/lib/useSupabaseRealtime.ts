@@ -6,8 +6,9 @@
  *   - agent_outputs → new rows for each agent start/complete event
  *   - hitl_checkpoints → HITL interrupt payloads
  *
- * If NEXT_PUBLIC_SUPABASE_* is missing from the client bundle, this hook
- * polls FastAPI instead of throwing (which previously crashed the tab).
+ * REST polling always runs as a backup. Realtime UPDATE events on `runs` are
+ * easy to miss (replica identity / RLS), which previously left HITL 1 looking
+ * stuck without an Approve card.
  */
 
 "use client";
@@ -54,6 +55,38 @@ function statusToRunRow(
   };
 }
 
+function mergeAgentOutputs(
+  existing: AgentOutputRow[],
+  incoming: AgentOutputRow[],
+): AgentOutputRow[] {
+  const byPhase = new Map<string, AgentOutputRow>();
+  for (const row of [...existing, ...incoming]) {
+    if (!row?.agent) continue;
+    const key = `${row.agent}:${row.phase}`;
+    const prev = byPhase.get(key);
+    const rowIsSynth = (row.id ?? "").includes("-synth-");
+    const prevIsSynth = (prev?.id ?? "").includes("-synth-");
+    if (!prev || (prevIsSynth && !rowIsSynth)) {
+      byPhase.set(key, row);
+    }
+  }
+  return [...byPhase.values()].sort((a, b) =>
+    (a.created_at ?? "").localeCompare(b.created_at ?? ""),
+  );
+}
+
+function hasTestResults(
+  raw: RunOutputResponse["test_results"],
+): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  return Boolean(
+    raw.framework ||
+      (raw.passed_count ?? 0) > 0 ||
+      (raw.failed_count ?? 0) > 0 ||
+      (Array.isArray(raw.failed) && raw.failed.length > 0),
+  );
+}
+
 function synthesizeAgentOutputs(output: RunOutputResponse): AgentOutputRow[] {
   const rows: AgentOutputRow[] = [];
   const created_at = new Date().toISOString();
@@ -88,7 +121,7 @@ function synthesizeAgentOutputs(output: RunOutputResponse): AgentOutputRow[] {
       created_at,
     });
   }
-  if (output.test_results) {
+  if (hasTestResults(output.test_results)) {
     rows.push({
       id: `${output.run_id}-synth-tests`,
       run_id: output.run_id,
@@ -185,24 +218,26 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
           getRunOutput(id),
         ]);
         setRunStatus(statusToRunRow(id, status));
-        setAgentOutputs(synthesizeAgentOutputs(output));
-        setCheckpointPayload(checkpointFromOutput(id, status, output));
+        setAgentOutputs((prev) =>
+          mergeAgentOutputs(prev, synthesizeAgentOutputs(output)),
+        );
+        const fromOutput = checkpointFromOutput(id, status, output);
+        if (fromOutput) {
+          setCheckpointPayload(fromOutput);
+        }
       } catch {
         // Polling is best-effort; the next tick retries.
       }
     }
 
-    function startPolling(): () => void {
-      setTransport("poll");
+    const pollTimer = window.setInterval(() => {
       void pollOnce();
-      const timer = window.setInterval(() => {
-        void pollOnce();
-      }, POLL_MS);
-      return () => window.clearInterval(timer);
-    }
+    }, POLL_MS);
+    void pollOnce();
 
     if (!supabase) {
-      return startPolling();
+      setTransport("poll");
+      return () => window.clearInterval(pollTimer);
     }
 
     setTransport("realtime");
@@ -235,18 +270,7 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
           for (const row of existingOutputs) {
             if (row?.id) processedIdsRef.current.add(row.id);
           }
-          setAgentOutputs((prev) => {
-            const byId = new Map<string, AgentOutputRow>();
-            for (const row of existingOutputs) {
-              if (row?.id) byId.set(row.id, row);
-            }
-            for (const row of prev) {
-              if (row?.id) byId.set(row.id, row);
-            }
-            return [...byId.values()].sort((a, b) =>
-              (a.created_at ?? "").localeCompare(b.created_at ?? ""),
-            );
-          });
+          setAgentOutputs((prev) => mergeAgentOutputs(existingOutputs, prev));
         }
 
         if (checkpointRes.data) {
@@ -255,7 +279,7 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
           setCheckpointPayload(row);
         }
       } catch {
-        // Initial hydrate failed; Realtime events can still populate state.
+        // Initial hydrate failed; polling still updates status.
       }
     })();
 
@@ -295,7 +319,7 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
             if (processedIdsRef.current.has(row.id)) return;
             processedIdsRef.current.add(row.id);
 
-            setAgentOutputs((prev) => [...prev, row]);
+            setAgentOutputs((prev) => mergeAgentOutputs(prev, [row]));
           },
         )
         .on(
@@ -327,10 +351,11 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
 
       channelRef.current = channel;
     } catch {
-      return startPolling();
+      setTransport("poll");
     }
 
     return () => {
+      window.clearInterval(pollTimer);
       unsubscribe();
     };
   }, [runId, unsubscribe]);
