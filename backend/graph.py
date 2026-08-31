@@ -29,7 +29,7 @@ from backend.agents.implementation_planner import implementation_planner_node
 from backend.agents.planner import planner_node
 from backend.agents.pr_summarizer import pr_summarizer_node
 from backend.agents.test_runner import test_runner_node
-from backend.config import normalize_psycopg_conninfo, settings
+from backend.config import settings
 from backend.state import PrismState
 
 logger = logging.getLogger(__name__)
@@ -101,14 +101,16 @@ async def get_checkpointer() -> AsyncPostgresSaver:
     AsyncPostgresSaver instance that can be owned by the module-level compiled graph.
     The pool outlives this function; its lifetime is tied to _compiled_graph.
     """
-    conninfo = normalize_psycopg_conninfo(settings.supabase_db_url)
-    parsed = urlparse(conninfo)
+    raw = settings.supabase_db_url.strip().replace(
+        "postgresql+psycopg://", "postgresql://", 1
+    )
+    parsed = urlparse(raw)
     user = parsed.username or "postgres"
     host = parsed.hostname or ""
     port = parsed.port or 5432
     dbname = (parsed.path or "/postgres").lstrip("/") or "postgres"
-    # Keyword params avoid libpq URI parsing dropping the pooler tenant suffix
-    # (postgres.<project-ref>) which then authenticates as user "postgres".
+    # Keyword params keep pooler tenant users (postgres.<ref>) and raw passwords
+    # (e.g. '*') intact. URI conninfo plus percent-encoding was failing auth on Modal.
     logger.info(
         "[graph] Opening Postgres pool — host=%s port=%s user=%s db=%s",
         host,
