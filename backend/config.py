@@ -8,6 +8,7 @@ module-level so that auto-tracing activates for every subsequent LangGraph run.
 
 import logging
 import os
+import re
 from urllib.parse import quote, urlparse, urlunparse
 
 from dotenv import load_dotenv
@@ -86,6 +87,29 @@ def parse_frontend_origins(raw: str) -> list[str]:
     slashes are stripped because browsers send Origin without one.
     """
     return [origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()]
+
+
+# Vercel preview URLs are https://<project>-<hash>-<team>.vercel.app and change
+# on every deploy. Starlette matches allow_origin_regex with fullmatch — this
+# is not a wildcard for the whole internet; it is scoped to this Vercel project.
+_CORS_ORIGIN_REGEX = (
+    r"https://prism(-[a-z0-9]+)*-sourav-manes-projects\.vercel\.app"
+    r"|https://prism-beta-one\.vercel\.app"
+    r"|http://(localhost|127\.0\.0\.1)(:\d+)?"
+)
+
+
+def cors_allow_origin_regex() -> str:
+    """Regex passed to CORSMiddleware.allow_origin_regex."""
+    return _CORS_ORIGIN_REGEX
+
+
+def origin_allowed_by_cors(origin: str, allowed_origins: list[str]) -> bool:
+    """True if Origin is an exact allow-list entry or matches the preview regex."""
+    normalized = origin.strip().rstrip("/")
+    if normalized in allowed_origins:
+        return True
+    return re.fullmatch(_CORS_ORIGIN_REGEX, normalized) is not None
 
 
 settings = Settings()  # type: ignore[call-arg]
