@@ -106,7 +106,7 @@ export default function PlanTab({ subtasks }: PlanTabProps) {
                   border: `1px solid ${cs.border}`,
                 }}
               >
-                {st.complexity.toUpperCase()}
+                {(st.complexity ?? "medium").toUpperCase()}
               </span>
 
               <span
@@ -142,7 +142,7 @@ export default function PlanTab({ subtasks }: PlanTabProps) {
                 </p>
 
                 {/* Dependencies */}
-                {st.dependencies.length > 0 && (
+                {(st.dependencies?.length ?? 0) > 0 && (
                   <div>
                     <p
                       className="text-xs font-medium mb-1.5 uppercase tracking-wider"
@@ -151,7 +151,7 @@ export default function PlanTab({ subtasks }: PlanTabProps) {
                       Depends on
                     </p>
                     <div className="flex flex-wrap gap-1.5">
-                      {st.dependencies.map((dep) => (
+                      {(st.dependencies ?? []).map((dep) => (
                         <span
                           key={dep}
                           className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
@@ -170,7 +170,7 @@ export default function PlanTab({ subtasks }: PlanTabProps) {
                 )}
 
                 {/* Likely files */}
-                {st.likely_files.length > 0 && (
+                {(st.likely_files?.length ?? 0) > 0 && (
                   <div>
                     <p
                       className="text-xs font-medium mb-1.5 uppercase tracking-wider"
@@ -179,7 +179,7 @@ export default function PlanTab({ subtasks }: PlanTabProps) {
                       Likely files
                     </p>
                     <div className="flex flex-col gap-1">
-                      {st.likely_files.map((file) => (
+                      {(st.likely_files ?? []).map((file) => (
                         <span
                           key={file}
                           className="flex items-center gap-1.5 text-xs font-mono"

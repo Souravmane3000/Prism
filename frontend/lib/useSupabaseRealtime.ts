@@ -1,28 +1,25 @@
 /**
- * lib/useSupabaseRealtime.ts — Custom hook for Supabase Realtime subscriptions.
+ * lib/useSupabaseRealtime.ts — Live run updates via Supabase Realtime, with REST poll fallback.
  *
  * Subscribes to postgres changes on three tables filtered by run_id:
  *   - runs          → updates RunRow (status, current_agent changes)
  *   - agent_outputs → new rows for each agent start/complete event
  *   - hitl_checkpoints → HITL interrupt payloads
  *
- * Rules enforced here:
- *   - Hydrates existing runs/agent_outputs/hitl_checkpoints on subscribe
- *     (Realtime only delivers rows inserted after subscribe)
- *   - processedIds Set prevents duplicate event renders
- *   - Auto-unsubscribes on terminal run status (completed | failed | cancelled)
- *   - Auto-unsubscribes on component unmount via useEffect cleanup
- *   - Never stores github_token; only subscribes by run_id
+ * If NEXT_PUBLIC_SUPABASE_* is missing from the client bundle, this hook
+ * polls FastAPI instead of throwing (which previously crashed the tab).
  */
 
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getRunOutput, getRunStatus } from "@/lib/api";
 import { getSupabaseClient } from "@/lib/supabase";
 import type {
   AgentOutputRow,
   CheckpointRow,
   RealtimeState,
+  RunOutputResponse,
   RunRow,
   RunStatus,
 } from "@/lib/types";
@@ -33,54 +30,197 @@ const TERMINAL_STATUSES: Set<RunStatus> = new Set([
   "cancelled",
 ]);
 
+const POLL_MS = 2500;
+
+type RealtimeChannel = ReturnType<
+  NonNullable<ReturnType<typeof getSupabaseClient>>["channel"]
+>;
+
+function statusToRunRow(
+  runId: string,
+  status: Awaited<ReturnType<typeof getRunStatus>>,
+): RunRow {
+  return {
+    id: status.run_id,
+    repo_url: "",
+    issue_url: null,
+    status: status.status,
+    current_agent: status.current_agent,
+    error: status.error,
+    all_tests_passed: status.all_tests_passed,
+    pr_url: null,
+    created_at: "",
+    updated_at: status.updated_at ?? "",
+  };
+}
+
+function synthesizeAgentOutputs(output: RunOutputResponse): AgentOutputRow[] {
+  const rows: AgentOutputRow[] = [];
+  const created_at = new Date().toISOString();
+
+  if (output.subtasks?.length) {
+    rows.push({
+      id: `${output.run_id}-synth-planner`,
+      run_id: output.run_id,
+      agent: "planner",
+      phase: "complete",
+      payload: { subtasks: output.subtasks },
+      created_at,
+    });
+  }
+  if (output.file_map && Object.keys(output.file_map).length > 0) {
+    rows.push({
+      id: `${output.run_id}-synth-navigator`,
+      run_id: output.run_id,
+      agent: "code_navigator",
+      phase: "complete",
+      payload: { file_map: output.file_map },
+      created_at,
+    });
+  }
+  if (output.implementation_plan?.length) {
+    rows.push({
+      id: `${output.run_id}-synth-impl`,
+      run_id: output.run_id,
+      agent: "impl_planner",
+      phase: "complete",
+      payload: { implementation_plan: output.implementation_plan },
+      created_at,
+    });
+  }
+  if (output.test_results) {
+    rows.push({
+      id: `${output.run_id}-synth-tests`,
+      run_id: output.run_id,
+      agent: "test_runner",
+      phase: "complete",
+      payload: { test_results: output.test_results },
+      created_at,
+    });
+  }
+  if (output.debug_report) {
+    rows.push({
+      id: `${output.run_id}-synth-debug`,
+      run_id: output.run_id,
+      agent: "debugger",
+      phase: "complete",
+      payload: { debug_report: output.debug_report },
+      created_at,
+    });
+  }
+  if (output.pr_draft) {
+    rows.push({
+      id: `${output.run_id}-synth-pr`,
+      run_id: output.run_id,
+      agent: "pr_summarizer",
+      phase: "complete",
+      payload: { pr_draft: output.pr_draft },
+      created_at,
+    });
+  }
+  return rows;
+}
+
+function checkpointFromOutput(
+  runId: string,
+  status: Awaited<ReturnType<typeof getRunStatus>>,
+  output: RunOutputResponse,
+): CheckpointRow | null {
+  if (status.status !== "awaiting_approval") return null;
+  const name =
+    status.current_agent === "hitl_2" ? "hitl_2" : "hitl_1";
+  return {
+    id: `${runId}-synth-${name}`,
+    run_id: runId,
+    checkpoint_name: name,
+    payload: {
+      subtasks: output.subtasks,
+      implementation_plan: output.implementation_plan,
+    },
+    user_decision: null,
+    created_at: new Date().toISOString(),
+    resolved_at: null,
+  };
+}
+
 export function useSupabaseRealtime(runId: string | null): RealtimeState {
   const [runStatus, setRunStatus] = useState<RunRow | null>(null);
   const [agentOutputs, setAgentOutputs] = useState<AgentOutputRow[]>([]);
   const [checkpointPayload, setCheckpointPayload] =
     useState<CheckpointRow | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [transport, setTransport] = useState<RealtimeState["transport"]>("none");
 
   const processedIdsRef = useRef<Set<string>>(new Set());
-  const channelRef = useRef<ReturnType<
-    ReturnType<typeof getSupabaseClient>["channel"]
-  > | null>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const unsubscribe = useCallback(() => {
     if (channelRef.current) {
       const supabase = getSupabaseClient();
-      supabase.removeChannel(channelRef.current);
+      supabase?.removeChannel(channelRef.current);
       channelRef.current = null;
       setIsConnected(false);
     }
   }, []);
 
   useEffect(() => {
-    if (!runId) return;
+    if (!runId) {
+      setTransport("none");
+      return;
+    }
 
-    // Reset state for the new run
+    const id = runId;
+
     processedIdsRef.current = new Set();
     setRunStatus(null);
     setAgentOutputs([]);
     setCheckpointPayload(null);
 
     const supabase = getSupabaseClient();
-    const channelName = `prism:run:${runId}`;
 
-    // Hydrate existing rows so completed / re-opened runs show pipeline cards.
-    // Realtime only delivers INSERTs after subscribe.
+    async function pollOnce(): Promise<void> {
+      try {
+        const [status, output] = await Promise.all([
+          getRunStatus(id),
+          getRunOutput(id),
+        ]);
+        setRunStatus(statusToRunRow(id, status));
+        setAgentOutputs(synthesizeAgentOutputs(output));
+        setCheckpointPayload(checkpointFromOutput(id, status, output));
+      } catch {
+        // Polling is best-effort; the next tick retries.
+      }
+    }
+
+    function startPolling(): () => void {
+      setTransport("poll");
+      void pollOnce();
+      const timer = window.setInterval(() => {
+        void pollOnce();
+      }, POLL_MS);
+      return () => window.clearInterval(timer);
+    }
+
+    if (!supabase) {
+      return startPolling();
+    }
+
+    setTransport("realtime");
+    const channelName = `prism:run:${id}`;
+
     void (async () => {
       try {
         const [runRes, outputsRes, checkpointRes] = await Promise.all([
-          supabase.from("runs").select("*").eq("id", runId).maybeSingle(),
+          supabase.from("runs").select("*").eq("id", id).maybeSingle(),
           supabase
             .from("agent_outputs")
             .select("*")
-            .eq("run_id", runId)
+            .eq("run_id", id)
             .order("created_at", { ascending: true }),
           supabase
             .from("hitl_checkpoints")
             .select("*")
-            .eq("run_id", runId)
+            .eq("run_id", id)
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle(),
@@ -104,7 +244,7 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
               if (row?.id) byId.set(row.id, row);
             }
             return [...byId.values()].sort((a, b) =>
-              a.created_at.localeCompare(b.created_at),
+              (a.created_at ?? "").localeCompare(b.created_at ?? ""),
             );
           });
         }
@@ -115,83 +255,80 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
           setCheckpointPayload(row);
         }
       } catch {
-        // Hydration is best-effort; live Realtime events still apply.
+        // Initial hydrate failed; Realtime events can still populate state.
       }
     })();
 
-    const channel = supabase
-      .channel(channelName)
-      // ── runs table: status and current_agent updates ─────────────────────
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "runs",
-          filter: `id=eq.${runId}`,
-        },
-        (payload) => {
-          const row = payload.new as RunRow;
-          if (!row) return;
-          setRunStatus(row);
+    try {
+      const channel = supabase
+        .channel(channelName)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "runs",
+            filter: `id=eq.${id}`,
+          },
+          (payload) => {
+            const row = payload.new as RunRow;
+            if (!row) return;
+            setRunStatus(row);
 
-          // Auto-unsubscribe when run reaches a terminal state
-          if (TERMINAL_STATUSES.has(row.status)) {
-            // Delay slightly so final events have time to arrive
-            setTimeout(() => unsubscribe(), 2000);
+            if (TERMINAL_STATUSES.has(row.status)) {
+              setTimeout(() => unsubscribe(), 2000);
+            }
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "agent_outputs",
+            filter: `run_id=eq.${id}`,
+          },
+          (payload) => {
+            const row = payload.new as AgentOutputRow;
+            if (!row?.id) return;
+
+            if (processedIdsRef.current.has(row.id)) return;
+            processedIdsRef.current.add(row.id);
+
+            setAgentOutputs((prev) => [...prev, row]);
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "hitl_checkpoints",
+            filter: `run_id=eq.${id}`,
+          },
+          (payload) => {
+            const row = payload.new as CheckpointRow;
+            if (!row?.id) return;
+
+            if (processedIdsRef.current.has(row.id)) return;
+            processedIdsRef.current.add(row.id);
+
+            setCheckpointPayload(row);
+          },
+        )
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            setIsConnected(true);
+            setTransport("realtime");
+          } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
+            setIsConnected(false);
           }
-        },
-      )
-      // ── agent_outputs table: start/complete events per agent ─────────────
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "agent_outputs",
-          filter: `run_id=eq.${runId}`,
-        },
-        (payload) => {
-          const row = payload.new as AgentOutputRow;
-          if (!row?.id) return;
+        });
 
-          // Deduplicate: skip if we've already processed this row id
-          if (processedIdsRef.current.has(row.id)) return;
-          processedIdsRef.current.add(row.id);
-
-          setAgentOutputs((prev) => [...prev, row]);
-        },
-      )
-      // ── hitl_checkpoints table: HITL interrupt payloads ──────────────────────
-      // Named hitl_checkpoints (not checkpoints) to avoid collision with
-      // LangGraph's own checkpoints table (AsyncPostgresSaver).
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "hitl_checkpoints",
-          filter: `run_id=eq.${runId}`,
-        },
-        (payload) => {
-          const row = payload.new as CheckpointRow;
-          if (!row?.id) return;
-
-          if (processedIdsRef.current.has(row.id)) return;
-          processedIdsRef.current.add(row.id);
-
-          setCheckpointPayload(row);
-        },
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          setIsConnected(true);
-        } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
-          setIsConnected(false);
-        }
-      });
-
-    channelRef.current = channel;
+      channelRef.current = channel;
+    } catch {
+      return startPolling();
+    }
 
     return () => {
       unsubscribe();
@@ -203,5 +340,6 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
     agentOutputs,
     checkpointPayload,
     isConnected,
+    transport,
   };
 }

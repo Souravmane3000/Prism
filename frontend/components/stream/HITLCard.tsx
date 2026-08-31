@@ -130,7 +130,7 @@ function SubtaskEditor({
                 opacity: 0.8,
               }}
             >
-              {st.complexity.toUpperCase()}
+              {(st.complexity ?? "medium").toUpperCase()}
             </span>
 
             <span
@@ -247,7 +247,7 @@ function PlanEditor({
       if (pi !== planIdx) return item;
       return {
         ...item,
-        steps: item.steps.map((step, si) =>
+        steps: (item.steps ?? []).map((step, si) =>
           si === stepIdx ? { ...step, [field]: value } : step,
         ),
       };
@@ -288,13 +288,14 @@ function PlanEditor({
               className="text-xs ml-auto"
               style={{ color: "var(--text-dim)" }}
             >
-              {item.steps.length} step{item.steps.length !== 1 ? "s" : ""}
+              {(item.steps ?? []).length} step
+              {(item.steps ?? []).length !== 1 ? "s" : ""}
             </span>
           </div>
 
           {expandedSubtask.has(pi) && (
             <div className="px-3 py-2 flex flex-col gap-2">
-              {item.steps.map((step, si) => (
+              {(item.steps ?? []).map((step, si) => (
                 <div
                   key={si}
                   className="pl-3 flex flex-col gap-1.5"

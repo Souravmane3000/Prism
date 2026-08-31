@@ -14,6 +14,7 @@ interface HeaderProps {
   activeRunId: string | null;
   runStatus: RunStatus | null;
   isConnected: boolean;
+  transport?: "realtime" | "poll" | "none";
 }
 
 function statusLabel(status: RunStatus | null): string {
@@ -37,6 +38,7 @@ export default function Header({
   activeRunId,
   runStatus,
   isConnected,
+  transport = "none",
 }: HeaderProps) {
   const isRunning = runStatus === "running";
   const isAwaiting = runStatus === "awaiting_approval";
@@ -120,7 +122,7 @@ export default function Header({
         <span
           className="w-1.5 h-1.5 rounded-full"
           style={{
-            backgroundColor: isConnected
+            backgroundColor: isConnected || transport === "poll"
               ? "var(--status-complete)"
               : "var(--text-muted)",
           }}
@@ -129,7 +131,13 @@ export default function Header({
           className="text-xs"
           style={{ color: "var(--text-dim)" }}
         >
-          {isConnected ? "Live" : "Offline"}
+          {isConnected
+            ? "Live"
+            : transport === "poll"
+              ? "Polling"
+              : activeRunId
+                ? "Connecting"
+                : "Offline"}
         </span>
       </div>
     </header>

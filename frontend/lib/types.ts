@@ -239,6 +239,7 @@ export interface RealtimeState {
   agentOutputs: AgentOutputRow[];
   checkpointPayload: CheckpointRow | null;
   isConnected: boolean;
+  transport: "realtime" | "poll" | "none";
 }
 
 /** Agent display info for the activity stream */

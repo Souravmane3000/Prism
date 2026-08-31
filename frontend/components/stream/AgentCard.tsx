@@ -136,7 +136,7 @@ export default function AgentCard({
               className="text-sm font-medium"
               style={{ color: "var(--text-primary)" }}
             >
-              {AGENT_LABELS[agent]}
+              {AGENT_LABELS[agent] ?? agent}
             </span>
 
             {/* Elapsed time */}

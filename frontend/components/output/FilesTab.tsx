@@ -75,7 +75,7 @@ export default function FilesTab({ fileMap }: FilesTabProps) {
   }
 
   const totalFiles = Object.values(fileMap).reduce(
-    (acc, arr) => acc + arr.length,
+    (acc, arr) => acc + (Array.isArray(arr) ? arr.length : 0),
     0,
   );
 
@@ -87,7 +87,9 @@ export default function FilesTab({ fileMap }: FilesTabProps) {
       </p>
 
       {subtaskIds.map((subtaskId) => {
-        const files = fileMap[subtaskId] ?? [];
+        const files = Array.isArray(fileMap[subtaskId])
+          ? fileMap[subtaskId]
+          : [];
         const isOpen = expanded.has(subtaskId);
 
         return (

@@ -81,6 +81,7 @@ function buildAgentMap(
   >();
 
   for (const row of outputs) {
+    if (!row?.agent) continue;
     const existing = map.get(row.agent) ?? {};
     if (row.phase === "start") {
       map.set(row.agent, { ...existing, startRow: row });

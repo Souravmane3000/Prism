@@ -59,7 +59,7 @@ export default function PrismWorkspace() {
   }, []);
 
   // Subscribe to Supabase Realtime for the active run
-  const { runStatus, agentOutputs, checkpointPayload, isConnected } =
+  const { runStatus, agentOutputs, checkpointPayload, isConnected, transport } =
     useSupabaseRealtime(activeRunId);
 
   // Reset approvedCheckpoint when:
@@ -203,6 +203,7 @@ export default function PrismWorkspace() {
         activeRunId={activeRunId}
         runStatus={currentRunStatus}
         isConnected={isConnected}
+        transport={transport}
       />
 
       {/* 3-panel workspace */}
