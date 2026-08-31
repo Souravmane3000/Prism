@@ -95,6 +95,16 @@ class TestSettings:
         assert "postgres%2E" not in out
         assert "Supabase123%2A" in out
 
+    def test_parse_frontend_origins_splits_and_strips(self):
+        from backend.config import parse_frontend_origins
+
+        assert parse_frontend_origins(
+            "https://prism-beta-one.vercel.app/, https://prism-sourav-manes-projects.vercel.app"
+        ) == [
+            "https://prism-beta-one.vercel.app",
+            "https://prism-sourav-manes-projects.vercel.app",
+        ]
+
     def test_langchain_project_defaults_to_prism(self):
         """LANGCHAIN_PROJECT defaults to 'prism'."""
         from backend.config import settings

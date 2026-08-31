@@ -77,6 +77,17 @@ def normalize_psycopg_conninfo(raw: str) -> str:
     return urlunparse(parsed._replace(netloc=netloc))
 
 
+def parse_frontend_origins(raw: str) -> list[str]:
+    """
+    Split FRONTEND_ORIGIN into exact CORS allow-list entries.
+
+    Comma-separated values are supported so production can allow both a
+    Vercel production alias and the *.vercel.app project URL. Trailing
+    slashes are stripped because browsers send Origin without one.
+    """
+    return [origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()]
+
+
 settings = Settings()  # type: ignore[call-arg]
 
 # ── LangSmith auto-tracing setup ─────────────────────────────────────────────
