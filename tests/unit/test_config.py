@@ -82,6 +82,19 @@ class TestSettings:
         assert "Supabase123%2A" in out
         assert "db.example.supabase.co:5432" in out
 
+    def test_normalize_psycopg_conninfo_keeps_pooler_username_dots(self):
+        """Supabase session pooler user is postgres.<project-ref>; encoding '.' breaks auth."""
+        from backend.config import normalize_psycopg_conninfo
+
+        raw = (
+            "postgresql://postgres.myref:Supabase123*"
+            "@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres"
+        )
+        out = normalize_psycopg_conninfo(raw)
+        assert "postgres.myref:" in out
+        assert "postgres%2E" not in out
+        assert "Supabase123%2A" in out
+
     def test_langchain_project_defaults_to_prism(self):
         """LANGCHAIN_PROJECT defaults to 'prism'."""
         from backend.config import settings

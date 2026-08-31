@@ -68,7 +68,8 @@ def normalize_psycopg_conninfo(raw: str) -> str:
     parsed = urlparse(url)
     if not parsed.password:
         return url
-    username = quote(parsed.username or "postgres", safe="")
+    # Keep '.' unencoded — Supabase pooler usernames are postgres.<project-ref>.
+    username = quote(parsed.username or "postgres", safe=".")
     password = quote(parsed.password, safe="")
     host = parsed.hostname or ""
     port = f":{parsed.port}" if parsed.port else ""
