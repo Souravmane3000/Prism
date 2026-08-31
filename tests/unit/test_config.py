@@ -105,6 +105,19 @@ class TestSettings:
             "https://prism-sourav-manes-projects.vercel.app",
         ]
 
+    def test_vercel_preview_origin_is_allowed_by_cors_regex(self):
+        """Each Vercel preview deployment gets a unique host; CORS must still allow it."""
+        from backend.config import origin_allowed_by_cors, parse_frontend_origins
+
+        allowed = parse_frontend_origins("http://localhost:3000")
+        preview = "https://prism-zbk16cgx6-sourav-manes-projects.vercel.app"
+        assert origin_allowed_by_cors(preview, allowed)
+        assert origin_allowed_by_cors("https://prism-beta-one.vercel.app", allowed)
+        assert origin_allowed_by_cors("https://prism-sourav-manes-projects.vercel.app", allowed)
+        assert origin_allowed_by_cors("http://localhost:3000", allowed)
+        assert origin_allowed_by_cors("http://127.0.0.1:8000", allowed)
+        assert not origin_allowed_by_cors("https://evil.example.com", allowed)
+
     def test_langchain_project_defaults_to_prism(self):
         """LANGCHAIN_PROJECT defaults to 'prism'."""
         from backend.config import settings
