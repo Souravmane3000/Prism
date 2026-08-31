@@ -15,8 +15,11 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Root-only Python packaging dirs. A bare `lib/` also matches frontend/lib
+# (api client, types, Realtime hook) and was omitting those files from GitHub,
+# which made Vercel fail with "Can't resolve '@/lib/api'".
+/lib/
+/lib64/
 parts/
 sdist/
 var/

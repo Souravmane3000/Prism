@@ -178,10 +178,6 @@ export default function ActivityStream({
         )}
       </div>
 
-      {/* DEBUG: Log runStatus to understand why HITL card might not show */}
-      {console.log("[ActivityStream] runStatus:", runStatus)}
-      {console.log("[ActivityStream] isAwaiting:", isAwaiting, "approvedCheckpoint:", approvedCheckpoint, "activeCheckpoint:", activeCheckpoint)}
-
       {/* Scrollable agent cards */}
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
         {visibleAgents.map((agent) => {
@@ -192,9 +188,6 @@ export default function ActivityStream({
           const isComplete = !!entry?.completeRow;
           const isError =
             runStatus?.current_agent === agent && !!runStatus?.error;
-          if (agent === "hitl_1" && isError) {
-            console.log(`[ActivityStream] hitl_1 has error:`, runStatus?.error);
-          }
 
           const completePayload = entry?.completeRow?.payload ?? {};
           const isDebuggerSkipped =
@@ -205,16 +198,6 @@ export default function ActivityStream({
           // For HITL nodes show interactive card when awaiting
           // Only hide if THIS SPECIFIC checkpoint was just approved (not a different one)
           const wasJustApproved = approvedCheckpoint === agent;
-          if (agent === "hitl_1" || agent === "hitl_2") {
-            console.log(`[ActivityStream] HITL check for ${agent}:`, {
-              isAwaiting,
-              approvedCheckpoint,
-              wasJustApproved,
-              activeCheckpoint,
-              matchesAgent: activeCheckpoint === agent,
-              wouldShowCard: isAwaiting && !wasJustApproved && activeCheckpoint === agent,
-            });
-          }
           if (
             isAwaiting &&
             !wasJustApproved &&
