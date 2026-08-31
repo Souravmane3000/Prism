@@ -27,7 +27,7 @@ image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git")
     .pip_install_from_pyproject("pyproject.toml")
-    .copy_local_dir("backend", "/root/backend")
+    .add_local_python_source("backend")
 )
 
 # ── Secrets ───────────────────────────────────────────────────────────────────
