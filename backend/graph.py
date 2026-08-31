@@ -15,6 +15,7 @@ request boundary between POST /start and POST /approve.
 """
 
 import logging
+from urllib.parse import urlparse
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
@@ -101,16 +102,33 @@ async def get_checkpointer() -> AsyncPostgresSaver:
     The pool outlives this function; its lifetime is tied to _compiled_graph.
     """
     conninfo = normalize_psycopg_conninfo(settings.supabase_db_url)
-    parsed_host = conninfo.split("@")[-1].split("/")[0] if "@" in conninfo else "unknown"
-    logger.info("[graph] Opening Postgres pool — host=%s", parsed_host)
+    parsed = urlparse(conninfo)
+    user = parsed.username or "postgres"
+    host = parsed.hostname or ""
+    port = parsed.port or 5432
+    dbname = (parsed.path or "/postgres").lstrip("/") or "postgres"
+    # Keyword params avoid libpq URI parsing dropping the pooler tenant suffix
+    # (postgres.<project-ref>) which then authenticates as user "postgres".
+    logger.info(
+        "[graph] Opening Postgres pool — host=%s port=%s user=%s db=%s",
+        host,
+        port,
+        user,
+        dbname,
+    )
 
     pool = AsyncConnectionPool(
-        conninfo=conninfo,
+        conninfo="",
         min_size=1,
         max_size=5,
         timeout=10,
         reconnect_timeout=0,
         kwargs={
+            "host": host,
+            "port": port,
+            "user": user,
+            "password": parsed.password or "",
+            "dbname": dbname,
             "autocommit": True,
             "prepare_threshold": 0,
             "sslmode": "require",
