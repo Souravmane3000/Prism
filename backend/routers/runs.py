@@ -617,7 +617,10 @@ async def start_run(
     except Exception as exc:
         logger.error("[runs] Failed to create run record: %s", exc, exc_info=True)
         raise _error_response(
-            "db_error", "Failed to initialise run", status.HTTP_500_INTERNAL_SERVER_ERROR
+            "db_error",
+            "Failed to initialise run",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            details={"exception_type": type(exc).__name__},
         )
 
     # github_token is intentionally absent from initial_state; agents read it from
