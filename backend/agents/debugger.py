@@ -7,10 +7,16 @@ and implementation plan, identifies the root cause (not just the symptom),
 and proposes a minimal targeted fix with a confidence score.
 
 No full rewrites. One targeted change per failure. Does not apply fixes.
+
+Large suites (hundreds of failures) must not block the pipeline: Modal
+run_pipeline times out at 600s, and one LLM call per failure hangs the UI.
+Analyse a small unique sample, then continue to PR Summarizer.
 """
 
+import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -28,6 +34,13 @@ from backend.state import (
 from backend.supabase_client import save_agent_output, update_run_status
 
 logger = logging.getLogger(__name__)
+
+# Hard caps so 456 sequential gpt-4o-mini calls cannot stall past Modal's
+# 600s worker timeout (the UI then looks "stuck" on Debugger forever).
+_MAX_FAILURES_TO_ANALYSE = 5
+_MAX_FALLBACK_FILES = 3
+_DEBUGGER_BUDGET_SECONDS = 90.0
+_LLM_CALL_TIMEOUT_SECONDS = 25.0
 
 _SYSTEM_PROMPT = """You are a senior software engineer performing targeted test failure analysis.
 
@@ -79,12 +92,35 @@ def _find_relevant_files(
                     mentioned.add(known_path)
 
     if not mentioned:
-        # Fallback: include all files from the file_map
+        ranked: list[tuple[float, str]] = []
         for entries in file_map.values():
             for entry in entries:
-                mentioned.add(entry["path"])
+                ranked.append((float(entry.get("relevance_score") or 0.0), entry["path"]))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        for _, path in ranked[:_MAX_FALLBACK_FILES]:
+            mentioned.add(path)
 
     return {p: file_contents[p] for p in mentioned if p in file_contents}
+
+
+def _select_failures_to_analyse(
+    failed_tests: list[TestFailure],
+    limit: int = _MAX_FAILURES_TO_ANALYSE,
+) -> list[TestFailure]:
+    """Deduplicate similar failures and keep a small sample for LLM analysis."""
+    selected: list[TestFailure] = []
+    seen: set[str] = set()
+    for failure in failed_tests:
+        name = str(failure.get("name") or "unknown")
+        hint = str(failure.get("message") or failure.get("traceback") or "")[:80]
+        fingerprint = f"{name}|{hint}"
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        selected.append(failure)
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def _find_related_plan(
@@ -179,8 +215,21 @@ async def debugger_node(state: PrismState) -> dict[str, Any]:
 
         llm = get_llm(temperature=0.1)
         fixes: list[DebugFix] = []
+        to_analyse = _select_failures_to_analyse(failed_tests)
+        deadline = time.monotonic() + _DEBUGGER_BUDGET_SECONDS
+        logger.info(
+            "[debugger] Analysing %d of %d unique-sampled failure(s)",
+            len(to_analyse),
+            len(failed_tests),
+        )
 
-        for failure in failed_tests:
+        for failure in to_analyse:
+            if time.monotonic() >= deadline:
+                logger.warning(
+                    "[debugger] Time budget exhausted after %d fix(es) — skipping remainder",
+                    len(fixes),
+                )
+                break
             relevant_files = _find_relevant_files(
                 failure.get("traceback", ""), file_map, file_contents
             )
@@ -189,7 +238,10 @@ async def debugger_node(state: PrismState) -> dict[str, Any]:
             messages = [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=user_prompt)]
 
             try:
-                response = await llm.ainvoke(messages)
+                response = await asyncio.wait_for(
+                    llm.ainvoke(messages),
+                    timeout=_LLM_CALL_TIMEOUT_SECONDS,
+                )
                 raw = str(response.content).strip()
                 if raw.startswith("```"):
                     lines = raw.split("\n")
@@ -209,6 +261,19 @@ async def debugger_node(state: PrismState) -> dict[str, Any]:
                     failure["name"],
                     fixes[-1]["confidence"],
                 )
+            except (TimeoutError, asyncio.TimeoutError):
+                logger.error(
+                    "[debugger] LLM timed out for '%s'", failure["name"]
+                )
+                fixes.append(
+                    DebugFix(
+                        failing_test=failure["name"],
+                        root_cause="Debugger LLM call timed out",
+                        proposed_fix="Manual investigation required",
+                        confidence=0.0,
+                        target_files=[],
+                    )
+                )
             except (json.JSONDecodeError, KeyError, ValueError) as exc:
                 logger.error(
                     "[debugger] Failed to parse debug output for '%s': %s", failure["name"], exc
@@ -223,12 +288,17 @@ async def debugger_node(state: PrismState) -> dict[str, Any]:
                     )
                 )
 
-        # Build summary
+        omitted = max(0, len(failed_tests) - len(fixes))
         high_conf = [f for f in fixes if f["confidence"] >= 0.7]
         summary = (
-            f"Analysed {len(failed_tests)} failing test(s). "
+            f"Analysed {len(fixes)} of {len(failed_tests)} failing test(s). "
             f"{len(high_conf)} fix proposal(s) with confidence ≥ 0.7."
         )
+        if omitted:
+            summary += (
+                f" {omitted} additional failure(s) were not analysed "
+                f"(cap {_MAX_FAILURES_TO_ANALYSE} unique samples)."
+            )
         debug_report = DebugReport(fixes=fixes, summary=summary)
 
         output_payload: dict[str, Any] = {"debug_report": dict(debug_report)}

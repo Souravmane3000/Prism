@@ -253,3 +253,57 @@ class TestDebuggerNode:
         assert isinstance(report["fixes"], list)
         assert len(report["fixes"]) == 1
         assert "summary" in report
+
+
+class TestSelectFailures:
+    def test_caps_and_deduplicates(self):
+        from backend.agents.debugger import _select_failures_to_analyse
+
+        failed = [
+            {"name": f"test_{i}", "traceback": "err", "message": "fail"}
+            for i in range(20)
+        ]
+        failed.extend(
+            [{"name": "test_0", "traceback": "err", "message": "fail"}] * 5
+        )
+        selected = _select_failures_to_analyse(failed, limit=5)
+        assert len(selected) == 5
+        names = [f["name"] for f in selected]
+        assert names == ["test_0", "test_1", "test_2", "test_3", "test_4"]
+
+
+class TestDebuggerCaps:
+    @pytest.mark.asyncio
+    async def test_does_not_call_llm_once_per_failure_on_large_suites(
+        self, mock_debug_supabase, mock_debug_llm
+    ):
+        """Hundreds of failures must not produce hundreds of LLM calls."""
+        from backend.agents.debugger import debugger_node
+
+        failed = [
+            {"name": f"test_{i}", "traceback": f"AssertionError {i}", "message": "Failed"}
+            for i in range(456)
+        ]
+        state = {
+            "run_id": "run-001",
+            "test_results": {
+                "framework": "pytest",
+                "passed": [],
+                "failed": failed,
+                "passed_count": 0,
+                "failed_count": 456,
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "",
+            },
+            "file_map": {},
+            "file_contents": {},
+            "implementation_plan": [],
+        }
+
+        result = await debugger_node(state)
+
+        assert mock_debug_llm.ainvoke.await_count == 5
+        assert len(result["debug_report"]["fixes"]) == 5
+        assert "456" in result["debug_report"]["summary"]
+        assert "5 of 456" in result["debug_report"]["summary"]
