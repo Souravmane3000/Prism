@@ -17,7 +17,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.config import parse_frontend_origins, settings
+from backend.config import cors_allow_origin_regex, parse_frontend_origins, settings
 from backend.graph import get_compiled_graph
 from backend.routers.runs import router
 from backend.supabase_client import get_supabase
@@ -85,13 +85,19 @@ app = FastAPI(
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-# Exact Origin match (no wildcard in production). FRONTEND_ORIGIN may be a
-# comma-separated list, e.g. the custom Vercel alias plus the project URL.
+# Exact origins from FRONTEND_ORIGIN, plus a scoped regex for Vercel preview
+# deployments (prism-<hash>-sourav-manes-projects.vercel.app). Never allow *.
 _FRONTEND_ORIGINS = parse_frontend_origins(settings.frontend_origin)
-logger.info("CORS allow_origins=%s", _FRONTEND_ORIGINS)
+_FRONTEND_ORIGIN_REGEX = cors_allow_origin_regex()
+logger.info(
+    "CORS allow_origins=%s allow_origin_regex=%s",
+    _FRONTEND_ORIGINS,
+    _FRONTEND_ORIGIN_REGEX,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_FRONTEND_ORIGINS,
+    allow_origin_regex=_FRONTEND_ORIGIN_REGEX,
     allow_credentials=False,  # PAT is in JSON body, not cookies — no credentials needed
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Accept"],
