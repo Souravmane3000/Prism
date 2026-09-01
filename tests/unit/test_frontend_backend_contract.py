@@ -159,6 +159,32 @@ class TestClassifyTestResults:
             ),
             (
                 {
+                    "framework": "unknown",
+                    "passed": [],
+                    "failed": [],
+                    "passed_count": 0,
+                    "failed_count": 0,
+                    "exit_code": 0,
+                    "stdout": "",
+                    "stderr": "",
+                },
+                "did_not_run",
+            ),
+            (
+                {
+                    "framework": "pytest",
+                    "passed": [],
+                    "failed": [],
+                    "passed_count": 0,
+                    "failed_count": 0,
+                    "exit_code": 0,
+                    "stdout": "",
+                    "stderr": "",
+                },
+                "passed",
+            ),
+            (
+                {
                     "framework": "pytest",
                     "passed": ["test_ok"],
                     "failed": [],
@@ -195,3 +221,18 @@ class TestClassifyTestResults:
         assert "export function classifyTestResults" in src
         for outcome in ("missing", "skipped", "did_not_run", "failed", "passed"):
             assert f'"{outcome}"' in src or f"'{outcome}'" in src
+
+    def test_frontend_unknown_empty_suite_is_did_not_run(self):
+        src = TS_OUTPUT.read_text(encoding="utf-8")
+        assert '!collected && (framework === "unknown"' in src
+
+    def test_hitl_card_stays_hidden_after_later_agents(self):
+        src = (ROOT / "frontend" / "lib" / "hitlVisibility.ts").read_text(
+            encoding="utf-8"
+        )
+        assert "export function shouldRenderHitlCard" in src
+        assert "laterAgentsStarted" in src
+        assert "resolvedCheckpoints.has(agent)" in src
+        page = (ROOT / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
+        assert "setApprovedCheckpoint(null)" not in page
+        assert "resolvedCheckpoints" in page

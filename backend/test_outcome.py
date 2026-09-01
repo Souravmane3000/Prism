@@ -34,6 +34,9 @@ def classify_test_results(results: Optional[dict[str, Any]]) -> str:
         isinstance(failed_list, list) and len(failed_list) > 0
     )
 
+    # Unknown framework + 0 collected is an empty sandbox dump, not a green suite.
+    if not collected and framework in {"unknown", ""}:
+        return "did_not_run"
     if exit_code != 0 and not collected:
         return "did_not_run"
     if failed_count > 0 or (isinstance(failed_list, list) and len(failed_list) > 0):

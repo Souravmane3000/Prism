@@ -13,6 +13,11 @@
 import { useEffect, useRef } from "react";
 import AgentCard from "@/components/stream/AgentCard";
 import HITLCard from "@/components/stream/HITLCard";
+import {
+  PIPELINE_ORDER,
+  isHitlResolved,
+  shouldRenderHitlCard,
+} from "@/lib/hitlVisibility";
 import type {
   AgentName,
   AgentOutputRow,
@@ -22,17 +27,9 @@ import type {
   Subtask,
 } from "@/lib/types";
 
-// Fixed pipeline order from GRAPH.md §8
-const AGENT_ORDER: AgentName[] = [
-  "planner",
-  "hitl_1",
-  "code_navigator",
-  "impl_planner",
-  "hitl_2",
-  "test_runner",
-  "debugger",
-  "pr_summarizer",
-];
+const PIPELINE_AGENTS = PIPELINE_ORDER.filter(
+  (a) => a !== "hitl_1" && a !== "hitl_2",
+);
 
 interface ActivityStreamProps {
   runId: string | null;
@@ -42,7 +39,7 @@ interface ActivityStreamProps {
   outputSubtasks?: Subtask[];
   outputPlan?: ImplementationPlanItem[];
   pat: string;
-  approvedCheckpoint: string | null; // Which checkpoint was just approved (to hide its card)
+  resolvedCheckpoints: ReadonlySet<string>;
   onApproved: (checkpoint: string) => void;
   onStopped: () => void;
 }
@@ -95,50 +92,6 @@ function buildAgentMap(
   return map;
 }
 
-function isTerminalStatus(status: RunRow["status"] | undefined): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
-}
-
-function shouldRenderHitlCard(
-  agent: AgentName,
-  runStatus: RunRow | null,
-  checkpointPayload: CheckpointRow | null,
-  approvedCheckpoint: string | null,
-  agentMap: Map<
-    AgentName,
-    { startRow?: AgentOutputRow; completeRow?: AgentOutputRow }
-  >,
-): boolean {
-  if (agent !== "hitl_1" && agent !== "hitl_2") return false;
-  if (approvedCheckpoint === agent) return false;
-  if (isTerminalStatus(runStatus?.status)) return false;
-
-  if (
-    runStatus?.status === "awaiting_approval" &&
-    (!runStatus.current_agent || runStatus.current_agent === agent)
-  ) {
-    return true;
-  }
-  if (runStatus?.current_agent === agent) return true;
-  if (
-    checkpointPayload?.checkpoint_name === agent &&
-    checkpointPayload.user_decision == null
-  ) {
-    return true;
-  }
-
-  if (agent === "hitl_1") {
-    return (
-      !!agentMap.get("planner")?.completeRow &&
-      !agentMap.get("code_navigator")
-    );
-  }
-  return (
-    !!agentMap.get("impl_planner")?.completeRow &&
-    !agentMap.get("test_runner")
-  );
-}
-
 export default function ActivityStream({
   runId,
   runStatus,
@@ -147,7 +100,7 @@ export default function ActivityStream({
   outputSubtasks = [],
   outputPlan = [],
   pat,
-  approvedCheckpoint,
+  resolvedCheckpoints,
   onApproved,
   onStopped,
 }: ActivityStreamProps) {
@@ -198,17 +151,51 @@ export default function ActivityStream({
   if (runStatus?.current_agent) {
     seenAgents.add(runStatus.current_agent as AgentName);
   }
-  if (shouldRenderHitlCard("hitl_1", runStatus, checkpointPayload, approvedCheckpoint, agentMap)) {
+  if (
+    shouldRenderHitlCard(
+      "hitl_1",
+      runStatus,
+      checkpointPayload,
+      resolvedCheckpoints,
+      agentMap,
+    ) ||
+    isHitlResolved(
+      "hitl_1",
+      resolvedCheckpoints,
+      agentMap,
+      checkpointPayload,
+      runStatus,
+    ) ||
+    agentMap.get("planner")?.completeRow
+  ) {
     seenAgents.add("hitl_1");
   }
-  if (shouldRenderHitlCard("hitl_2", runStatus, checkpointPayload, approvedCheckpoint, agentMap)) {
+  if (
+    shouldRenderHitlCard(
+      "hitl_2",
+      runStatus,
+      checkpointPayload,
+      resolvedCheckpoints,
+      agentMap,
+    ) ||
+    isHitlResolved(
+      "hitl_2",
+      resolvedCheckpoints,
+      agentMap,
+      checkpointPayload,
+      runStatus,
+    ) ||
+    agentMap.get("impl_planner")?.completeRow
+  ) {
     seenAgents.add("hitl_2");
   }
 
-  // Filter pipeline to only agents that have appeared
-  const visibleAgents = AGENT_ORDER.filter(
+  const visibleAgents = PIPELINE_ORDER.filter(
     (a) => seenAgents.has(a) || a === runStatus?.current_agent,
   );
+  const completedPipelineAgents = PIPELINE_AGENTS.filter(
+    (a) => !!agentMap.get(a)?.completeRow,
+  ).length;
 
   return (
     <div className="flex flex-col h-full">
@@ -225,8 +212,7 @@ export default function ActivityStream({
         </span>
         {agentOutputs.length > 0 && (
           <span className="text-xs" style={{ color: "var(--text-dim)" }}>
-            {agentOutputs.filter((o) => o.phase === "complete").length} /{" "}
-            {AGENT_ORDER.filter((a) => !["hitl_1", "hitl_2"].includes(a)).length} agents
+            {completedPipelineAgents} / {PIPELINE_AGENTS.length} agents
           </span>
         )}
       </div>
@@ -238,26 +224,29 @@ export default function ActivityStream({
           const isRunning =
             runStatus?.current_agent === agent &&
             runStatus?.status === "running";
-          const isComplete = !!entry?.completeRow;
+          const hitlResolved = isHitlResolved(
+            agent,
+            resolvedCheckpoints,
+            agentMap,
+            checkpointPayload,
+            runStatus,
+          );
+          const isComplete = !!entry?.completeRow || hitlResolved;
           const isError =
             runStatus?.current_agent === agent && !!runStatus?.error;
 
           const completePayload = entry?.completeRow?.payload ?? {};
           const isDebuggerSkipped =
             agent === "debugger" &&
-            !seenAgents.has("debugger") &&
+            !agentMap.get("debugger") &&
             seenAgents.has("pr_summarizer");
 
-          // For HITL nodes show interactive card when awaiting
-          // Only hide if THIS SPECIFIC checkpoint was just approved (not a different one)
-          const wasJustApproved = approvedCheckpoint === agent;
           if (
-            !wasJustApproved &&
             shouldRenderHitlCard(
               agent,
               runStatus,
               checkpointPayload,
-              approvedCheckpoint,
+              resolvedCheckpoints,
               agentMap,
             )
           ) {
@@ -304,7 +293,7 @@ export default function ActivityStream({
               }
               startedAt={entry?.startRow?.created_at ?? null}
               completedAt={entry?.completeRow?.created_at ?? null}
-              isRunning={isRunning}
+              isRunning={isRunning && !hitlResolved}
               isSkipped={isDebuggerSkipped}
               isError={isError}
               payload={completePayload}

@@ -224,6 +224,15 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
         const fromOutput = checkpointFromOutput(id, status, output);
         if (fromOutput) {
           setCheckpointPayload(fromOutput);
+        } else if (status.status !== "awaiting_approval") {
+          setCheckpointPayload((prev) => {
+            if (!prev || prev.user_decision != null) return prev;
+            return {
+              ...prev,
+              user_decision: { action: "approve" },
+              resolved_at: prev.resolved_at ?? new Date().toISOString(),
+            };
+          });
         }
       } catch {
         // Polling is best-effort; the next tick retries.
@@ -325,7 +334,7 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
         .on(
           "postgres_changes",
           {
-            event: "INSERT",
+            event: "*",
             schema: "public",
             table: "hitl_checkpoints",
             filter: `run_id=eq.${id}`,
@@ -334,9 +343,7 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
             const row = payload.new as CheckpointRow;
             if (!row?.id) return;
 
-            if (processedIdsRef.current.has(row.id)) return;
             processedIdsRef.current.add(row.id);
-
             setCheckpointPayload(row);
           },
         )

@@ -39,9 +39,11 @@ export default function PrismWorkspace() {
   const [runOutput, setRunOutput] = useState<RunOutputResponse | null>(null);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [prUrl, setPrUrl] = useState<string | null>(null);
-  // Track which checkpoint was just approved to hide that specific card (before Realtime catches up)
-  // null = no recent approval, "hitl_1" or "hitl_2" = that checkpoint was just approved
-  const [approvedCheckpoint, setApprovedCheckpoint] = useState<string | null>(null);
+  // Checkpoints the user already decided on this run. Must persist for the
+  // whole run — clearing when the next agent starts re-shows Approve/Stop.
+  const [resolvedCheckpoints, setResolvedCheckpoints] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   // Track last processed agent_output count to avoid duplicate fetches
   const lastOutputCountRef = useRef(0);
@@ -61,20 +63,6 @@ export default function PrismWorkspace() {
   // Subscribe to Supabase Realtime for the active run
   const { runStatus, agentOutputs, checkpointPayload, isConnected, transport } =
     useSupabaseRealtime(activeRunId);
-
-  // Keep approvedCheckpoint until a later agent starts so the HITL card
-  // does not flash back while status is still "running".
-  useEffect(() => {
-    if (
-      approvedCheckpoint &&
-      runStatus?.current_agent &&
-      runStatus.current_agent !== approvedCheckpoint &&
-      runStatus.current_agent !== "hitl_1" &&
-      runStatus.current_agent !== "hitl_2"
-    ) {
-      setApprovedCheckpoint(null);
-    }
-  }, [runStatus?.current_agent, approvedCheckpoint]);
 
   useEffect(() => {
     if (runStatus?.status === "awaiting_approval" && activeRunId) {
@@ -142,7 +130,7 @@ export default function PrismWorkspace() {
       setPat(token);
       setRunOutput(null);
       setPrUrl(null);
-      setApprovedCheckpoint(null); // Reset for new run
+      setResolvedCheckpoints(new Set());
       lastOutputCountRef.current = 0;
 
       // Reload sessions from localStorage (RunForm already saved it)
@@ -159,6 +147,7 @@ export default function PrismWorkspace() {
   const handleSelectSession = useCallback((runId: string) => {
     setActiveRunId(runId);
     setRunOutput(null);
+    setResolvedCheckpoints(new Set());
     lastOutputCountRef.current = 0;
 
     // Fetch latest output for selected session
@@ -171,8 +160,11 @@ export default function PrismWorkspace() {
   }, []);
 
   const handleApproved = useCallback((checkpoint: string) => {
-    // Immediately hide this specific HITL card to prevent double-clicks while Realtime catches up
-    setApprovedCheckpoint(checkpoint);
+    setResolvedCheckpoints((prev) => {
+      const next = new Set(prev);
+      next.add(checkpoint);
+      return next;
+    });
     
     // Also refresh output
     if (activeRunId) {
@@ -231,7 +223,7 @@ export default function PrismWorkspace() {
               outputSubtasks={runOutput?.subtasks ?? []}
               outputPlan={runOutput?.implementation_plan ?? []}
               pat={pat}
-              approvedCheckpoint={approvedCheckpoint}
+              resolvedCheckpoints={resolvedCheckpoints}
               onApproved={handleApproved}
               onStopped={handleStopped}
             />

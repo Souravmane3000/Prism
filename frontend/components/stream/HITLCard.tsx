@@ -354,6 +354,7 @@ export default function HITLCard({
   const [editedPlan, setEditedPlan] =
     useState<ImplementationPlanItem[]>(initialPlan);
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Prevent double-fire: if a request is already in-flight, block new ones
   const approveInFlightRef = useRef(false);
@@ -371,7 +372,7 @@ export default function HITLCard({
   }, [initialPlan]);
 
   async function handleApprove() {
-    if (approveInFlightRef.current || loading) return;
+    if (approveInFlightRef.current || loading || submitted) return;
     if (!pat) {
       setError("GitHub PAT is required to approve. Re-enter it in the form.");
       return;
@@ -389,7 +390,8 @@ export default function HITLCard({
         implementation_plan: !isHitl1 ? editedPlan : null,
         github_token: pat,
       });
-      onApproved(checkpoint); // Pass which checkpoint was approved
+      setSubmitted(true);
+      onApproved(checkpoint);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to approve");
     } finally {
@@ -399,6 +401,7 @@ export default function HITLCard({
   }
 
   async function handleStop() {
+    if (approveInFlightRef.current || loading || submitted) return;
     setError(null);
     setLoading(true);
     try {
@@ -409,12 +412,18 @@ export default function HITLCard({
         implementation_plan: null,
         github_token: pat,
       });
+      setSubmitted(true);
+      onApproved(checkpoint);
       onStopped();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to stop run");
     } finally {
       setLoading(false);
     }
+  }
+
+  if (submitted) {
+    return null;
   }
 
   return (
@@ -486,6 +495,7 @@ export default function HITLCard({
           loading={loading}
           disabled={
             loading ||
+            submitted ||
             !pat ||
             (isHitl1 && editedSubtasks.length === 0)
           }
@@ -498,7 +508,7 @@ export default function HITLCard({
         <Button
           variant="danger"
           size="sm"
-          disabled={loading}
+          disabled={loading || submitted}
           onClick={handleStop}
         >
           <XCircle size={13} />

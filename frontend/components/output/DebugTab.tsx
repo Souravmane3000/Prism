@@ -69,6 +69,16 @@ export default function DebugTab({
   const outcome = classifyTestResults(testResults);
   const suiteDidNotRun = outcome === "did_not_run";
   const runnerLog = (testResults?.stderr || testResults?.stdout || "").trim();
+  const knownFramework = !["unknown", "skipped", "not_run", ""].includes(
+    (testResults?.framework ?? "").toLowerCase(),
+  );
+  const testsCollected =
+    (testResults?.passed_count ?? 0) + (testResults?.failed_count ?? 0) > 0 ||
+    (testResults?.failed?.length ?? 0) > 0;
+  const showAllPassedBanner =
+    allTestsPassed === true &&
+    outcome === "passed" &&
+    (testsCollected || knownFramework);
 
   // Nothing to show yet
   if (!testResults && !debugReport && allTestsPassed === null && !isComplete) {
@@ -136,8 +146,8 @@ export default function DebugTab({
             >
               {outcome === "skipped"
                 ? "not run locally"
-                : testResults.framework === "unknown"
-                  ? "suite did not start"
+                : outcome === "did_not_run"
+                  ? "no tests collected"
                   : testResults.framework}
             </span>
           </div>
@@ -232,20 +242,33 @@ export default function DebugTab({
         <div
           className="flex flex-col gap-2 p-4 rounded-xl"
           style={{
-            backgroundColor: "rgba(248, 113, 113, 0.06)",
-            border: "1px solid rgba(248, 113, 113, 0.25)",
+            backgroundColor:
+              testResults.exit_code === 0
+                ? "var(--bg-card)"
+                : "rgba(248, 113, 113, 0.06)",
+            border:
+              testResults.exit_code === 0
+                ? "1px solid var(--border-subtle)"
+                : "1px solid rgba(248, 113, 113, 0.25)",
           }}
         >
           <p
             className="text-xs font-medium"
-            style={{ color: "var(--status-error)" }}
+            style={{
+              color:
+                testResults.exit_code === 0
+                  ? "var(--text-primary)"
+                  : "var(--status-error)",
+            }}
           >
-            Repository tests never ran (exit code {testResults.exit_code})
+            {testResults.exit_code === 0
+              ? "No test suite was detected"
+              : `Repository tests never ran (exit code ${testResults.exit_code})`}
           </p>
           <p className="text-xs" style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
-            Passed/failed stay at 0 because the sandbox exited before collecting
-            tests. This is not a count of Prism agents. The log below is the
-            actual failure.
+            {testResults.exit_code === 0
+              ? "Passed and failed stay at 0 because the sandbox did not find pytest, unittest, or Jest in this repository. That is not a successful test run."
+              : "Passed/failed stay at 0 because the sandbox exited before collecting tests. This is not a count of Prism agents. The log below is the actual failure."}
           </p>
           {runnerLog && (
             <pre
@@ -267,7 +290,7 @@ export default function DebugTab({
       )}
 
       {/* All tests passed / debugger skipped */}
-      {allTestsPassed === true && outcome === "passed" && (
+      {showAllPassedBanner && (
         <div
           className="flex items-center gap-3 p-4 rounded-xl"
           style={{

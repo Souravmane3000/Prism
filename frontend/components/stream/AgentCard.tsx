@@ -9,7 +9,8 @@
 "use client";
 
 import { CheckCircle2, XCircle, Loader2, Clock, SkipForward } from "lucide-react";
-import type { AgentName, AgentPhase } from "@/lib/types";
+import { classifyTestResults } from "@/lib/output";
+import type { AgentName, AgentPhase, TestResults } from "@/lib/types";
 
 interface AgentCardProps {
   agent: AgentName;
@@ -154,7 +155,7 @@ export default function AgentCard({
           {/* Description / phase label */}
           <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
             {isSkipped
-              ? "Skipped — all tests passed"
+              ? "Skipped — no failures to debug"
               : isError
                 ? String(payload.error ?? "An error occurred")
                 : isComplete && summary
@@ -190,28 +191,27 @@ function getSummary(
       }
       return null;
     }
+    case "hitl_1":
+    case "hitl_2": {
+      const action = payload.action;
+      if (action === "stop" || action === "restart") return "Stopped by user";
+      return "Approved";
+    }
     case "test_runner": {
       if (typeof payload.error === "string" && payload.error.length > 0) {
         return "Test suite failed to start — see Debug";
       }
-      const tr = payload.test_results as
-        | {
-            passed_count?: number;
-            failed_count?: number;
-            framework?: string;
-            exit_code?: number;
-            stderr?: string;
-          }
-        | undefined;
+      const tr = payload.test_results as TestResults | undefined;
       if (tr) {
-        if ((tr.framework ?? "").toLowerCase() === "skipped") {
+        const outcome = classifyTestResults(tr);
+        if (outcome === "skipped") {
           return "Skipped locally — tests run on Modal deploy";
+        }
+        if (outcome === "did_not_run") {
+          return "No tests collected — see Debug";
         }
         const passed = tr.passed_count ?? 0;
         const failed = tr.failed_count ?? 0;
-        if ((tr.exit_code ?? 0) !== 0 && passed === 0 && failed === 0) {
-          return "Test suite did not run — see Debug";
-        }
         return `${tr.framework ?? "Unknown"} — ${passed} passed, ${failed} failed`;
       }
       return null;
