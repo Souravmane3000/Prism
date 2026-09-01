@@ -36,6 +36,26 @@ image = (
 production_secrets = modal.Secret.from_name("prism-secrets")
 
 
+@app.function(
+    image=image,
+    secrets=[production_secrets],
+    timeout=600,
+    memory=1024,
+)
+async def run_pipeline(
+    run_id: str,
+    github_token: str,
+    initial_state: dict | None = None,
+) -> None:
+    """
+    Detached pipeline worker. Spawned from POST /start and POST /approve so the
+    HTTP response is not held open until the Planner (or later agents) finish.
+    """
+    from backend.routers.runs import execute_pipeline_job  # noqa: PLC0415
+
+    await execute_pipeline_job(run_id, github_token, initial_state)
+
+
 # ── Web endpoint ──────────────────────────────────────────────────────────────
 @app.function(
     image=image,

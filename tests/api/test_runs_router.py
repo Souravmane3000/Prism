@@ -50,7 +50,7 @@ def mock_db_for_start():
             "backend.routers.runs.create_run",
             new=AsyncMock(return_value="run-00000000-0000-0000-0000-000000000001"),
         ),
-        patch("backend.routers.runs._run_graph_background", new=AsyncMock()),
+        patch("backend.routers.runs._schedule_pipeline", new=MagicMock()),
     ):
         yield
 
@@ -195,7 +195,7 @@ class TestApproveRun:
             patch("backend.routers.runs.save_agent_output", new=AsyncMock()),
             patch("backend.routers.runs.update_run_status", new=AsyncMock()),
             patch("backend.routers.runs.get_compiled_graph", new=AsyncMock(return_value=mock_graph)),
-            patch("backend.routers.runs._resume_graph_background", new=AsyncMock()),
+            patch("backend.routers.runs._schedule_pipeline", new=MagicMock()),
         ):
             response = test_client.post(
                 "/api/runs/run-001/approve",

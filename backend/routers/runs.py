@@ -22,7 +22,7 @@ import logging
 import re
 from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.github_client import (
@@ -533,6 +533,57 @@ async def _resume_graph_background(run_id: str, github_token: str) -> None:
             pass
 
 
+def _schedule_pipeline(
+    run_id: str,
+    github_token: str,
+    initial_state: Optional[dict[str, Any]] = None,
+) -> None:
+    """
+    Start or resume the graph without holding the HTTP response open.
+
+    FastAPI BackgroundTasks run inside the ASGI request lifecycle. Modal does
+    not flush the Start Run response until that lifecycle ends, so the browser
+    hits the 15s abort and never receives run_id — the Planner looks like it
+    never started. Spawn a dedicated Modal function when available; otherwise
+    use asyncio.create_task so the 201 returns immediately.
+    """
+    try:
+        import modal
+
+        fn = modal.Function.from_name("prism", "run_pipeline")
+        fn.spawn(run_id, github_token, initial_state)
+        logger.info(
+            "[runs] Spawned Modal run_pipeline — run_id=%s resume=%s",
+            run_id,
+            initial_state is None,
+        )
+        return
+    except Exception as exc:
+        logger.warning(
+            "[runs] Modal spawn unavailable (%s) — using in-process task",
+            type(exc).__name__,
+        )
+
+    coro = (
+        _resume_graph_background(run_id, github_token)
+        if initial_state is None
+        else _run_graph_background(run_id, initial_state, github_token)
+    )
+    asyncio.get_running_loop().create_task(coro)
+
+
+async def execute_pipeline_job(
+    run_id: str,
+    github_token: str,
+    initial_state: Optional[dict[str, Any]] = None,
+) -> None:
+    """Entry point for the Modal run_pipeline worker."""
+    if initial_state is None:
+        await _resume_graph_background(run_id, github_token)
+        return
+    await _run_graph_background(run_id, initial_state, github_token)
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 
@@ -544,11 +595,10 @@ async def _resume_graph_background(run_id: str, github_token: str) -> None:
 )
 async def start_run(
     body: StartRunRequest,
-    background_tasks: BackgroundTasks,
 ) -> StartRunResponse:
     """
     Validate inputs, create a run record, seed PrismState, and fire the graph
-    as a background task. Returns run_id immediately so the client can subscribe
+    off-request. Returns run_id immediately so the client can subscribe
     to Supabase Realtime before the first agent event arrives.
     """
     logger.info(
@@ -593,8 +643,8 @@ async def start_run(
         "messages": [],
     }
 
-    background_tasks.add_task(_run_graph_background, run_id, initial_state, body.github_token)
-    logger.info("[runs] Run %s started — background graph task queued", run_id)
+    _schedule_pipeline(run_id, body.github_token, dict(initial_state))
+    logger.info("[runs] Run %s started — pipeline queued", run_id)
 
     return StartRunResponse(run_id=run_id, status="running", current_agent="planner")
 
@@ -693,7 +743,6 @@ async def get_run_output(run_id: str) -> RunOutputResponse:
 async def approve_run(
     run_id: str,
     body: ApproveRunRequest,
-    background_tasks: BackgroundTasks,
 ) -> ApproveRunResponse:
     """
     Validates the run is awaiting approval at the correct checkpoint,
@@ -805,7 +854,7 @@ async def approve_run(
             run_id,
         )
     # github_token is passed here so agents after resume can access it via config
-    background_tasks.add_task(_resume_graph_background, run_id, body.github_token)
+    _schedule_pipeline(run_id, body.github_token, None)
 
     return ApproveRunResponse(
         run_id=run_id,

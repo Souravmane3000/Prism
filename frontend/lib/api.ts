@@ -5,7 +5,8 @@
  *       No fetch() calls are permitted in React components.
  *       All endpoints target the FastAPI routes defined in API.md.
  *
- * Timeout: 15 seconds on all REST calls.
+ * Timeout: 15 seconds on most REST calls. POST /start allows 45 seconds for
+ * Modal cold start; the graph itself must not run inside that request.
  * Errors: Throws ApiError with structured detail from the backend envelope.
  */
 
@@ -23,6 +24,7 @@ import type {
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 const REQUEST_TIMEOUT_MS = 15_000;
+const START_TIMEOUT_MS = 45_000;
 
 // ── Error class ──────────────────────────────────────────────────────────────
 
@@ -44,13 +46,17 @@ export class ApiError extends Error {
 
 // ── Core request helper ──────────────────────────────────────────────────────
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  options?: RequestInit & { timeoutMs?: number },
+): Promise<T> {
+  const { timeoutMs = REQUEST_TIMEOUT_MS, ...fetchOptions } = options ?? {};
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
-      ...options,
+      ...fetchOptions,
       signal: controller.signal,
     });
 
@@ -89,7 +95,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       throw new ApiError(
         {
           code: "timeout",
-          message: "Request timed out after 15 seconds",
+          message: `Request timed out after ${timeoutMs / 1000} seconds`,
           run_id: null,
           details: {},
         },
@@ -126,6 +132,7 @@ export function startRun(body: StartRunRequest): Promise<StartRunResponse> {
     method: "POST",
     headers: JSON_HEADERS,
     body: JSON.stringify(body),
+    timeoutMs: START_TIMEOUT_MS,
   });
 }
 
@@ -158,6 +165,7 @@ export function approveRun(
     method: "POST",
     headers: JSON_HEADERS,
     body: JSON.stringify(body),
+    timeoutMs: START_TIMEOUT_MS,
   });
 }
 
