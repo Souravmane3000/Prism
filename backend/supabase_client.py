@@ -4,9 +4,9 @@ backend/supabase_client.py — Supabase client and all database helper functions
 All public functions are async. They delegate blocking network I/O to a thread
 pool via asyncio.to_thread so the FastAPI/LangGraph event loop is never blocked.
 
-The Supabase service-role REST client is used first. If Cloudflare in front of
-*.supabase.co returns 522 HTML (common from Modal), we write through the IPv4
-session pooler instead. Realtime still fires from WAL on those SQL inserts.
+The IPv4 session pooler is the primary write/read path. Supabase REST
+(*.supabase.co) is a secondary fallback: Modal regions often get Cloudflare
+521/522 HTML from that host. Realtime still fires from WAL on SQL inserts.
 
 SECURITY: github_token is NEVER written by any function in this module.
 """
@@ -166,7 +166,7 @@ async def _sql_executemany(query: str, params_seq: list[tuple[Any, ...]]) -> Non
 async def ping_postgres() -> None:
     """Startup check that does not go through Cloudflare REST."""
     row = await _sql_fetchone("SELECT 1 AS ok")
-    if not row or row.get("ok") != 1:
+    if not row:
         raise RuntimeError("Postgres pooler ping returned no row")
 
 
@@ -174,16 +174,19 @@ async def _with_sql_fallback(
     rest_fn: Callable[[], T],
     sql_fn: Callable[[], Any],
 ) -> T:
+    """Prefer the session pooler; REST is only used if SQL fails."""
     try:
-        return await _to_thread_retry(rest_fn)
-    except Exception as exc:
-        if not should_use_sql_fallback(exc):
-            raise
-        logger.warning(
-            "Supabase REST unavailable (%s) — using Postgres pooler",
-            type(exc).__name__,
-        )
         return await sql_fn()  # type: ignore[no-any-return]
+    except Exception as sql_exc:
+        logger.warning(
+            "Postgres pooler unavailable (%s) — trying Supabase REST",
+            type(sql_exc).__name__,
+        )
+        try:
+            return await _to_thread_retry(rest_fn)
+        except Exception as rest_exc:
+            logger.error("Supabase REST also failed (%s)", type(rest_exc).__name__)
+            raise sql_exc from rest_exc
 
 
 async def _to_thread_retry(fn: Callable[[], T], *, attempts: int = 3) -> T:
@@ -241,36 +244,36 @@ async def create_run(
     The full token is never stored.
     """
     run_id = str(uuid.uuid4())
-    client = get_supabase()
+    hint = github_token_hint[-4:] if github_token_hint else None
+    if hint == "":
+        hint = None
     insert_data: dict[str, Any] = {
         "id": run_id,
         "repo_url": repo_url,
         "issue_url": issue_url,
         "issue_text": issue_text,
-        "github_token_hint": github_token_hint[-4:] if github_token_hint else "",
+        "github_token_hint": hint,
         "status": "running",
         "current_agent": "planner",
     }
-    try:
-        await _with_sql_fallback(
-            lambda: client.table("runs").insert(insert_data).execute(),
-            lambda: _sql_execute(
-                """
-                INSERT INTO runs (
-                    id, repo_url, issue_url, issue_text,
-                    github_token_hint, status, current_agent
-                )
-                VALUES (%s, %s, %s, %s, %s, 'running', 'planner')
-                """,
-                (
-                    run_id,
-                    repo_url,
-                    issue_url,
-                    issue_text,
-                    insert_data["github_token_hint"],
-                ),
-            ),
+
+    async def _via_sql() -> None:
+        await _sql_execute(
+            """
+            INSERT INTO runs (
+                id, repo_url, issue_url, issue_text,
+                github_token_hint, status, current_agent
+            )
+            VALUES (%s, %s, %s, %s, %s, 'running'::run_status, 'planner')
+            """,
+            (run_id, repo_url, issue_url, issue_text, hint),
         )
+
+    def _via_rest() -> Any:
+        return get_supabase().table("runs").insert(insert_data).execute()
+
+    try:
+        await _with_sql_fallback(_via_rest, _via_sql)
         logger.info("Created run %s for repo %s", run_id, repo_url)
         return run_id
     except Exception as exc:
@@ -309,7 +312,7 @@ async def update_run_status(
             lambda: _sql_execute(
                 """
                 UPDATE runs
-                SET status = %s,
+                SET status = %s::run_status,
                     current_agent = %s,
                     updated_at = %s,
                     error = COALESCE(%s, error),

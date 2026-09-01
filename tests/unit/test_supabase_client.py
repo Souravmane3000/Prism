@@ -90,17 +90,36 @@ class TestTransientHttpError:
         assert not should_use_sql_fallback(Exception("PGRST204 Could not find the table"))
 
 
+class TestPingPostgres:
+    @pytest.mark.asyncio
+    async def test_accepts_integer_one(self):
+        with patch(
+            "backend.supabase_client._sql_fetchone",
+            new=AsyncMock(return_value={"ok": 1}),
+        ):
+            from backend.supabase_client import ping_postgres
+
+            await ping_postgres()
+
+    @pytest.mark.asyncio
+    async def test_rejects_empty_row(self):
+        with patch(
+            "backend.supabase_client._sql_fetchone",
+            new=AsyncMock(return_value=None),
+        ):
+            from backend.supabase_client import ping_postgres
+
+            with pytest.raises(RuntimeError, match="no row"):
+                await ping_postgres()
+
+
 class TestCreateRun:
     @pytest.mark.asyncio
     async def test_generates_uuid_and_inserts_correct_fields(self):
-        """create_run generates a UUID run_id and inserts the correct fields."""
-        client_mock, execute_result = _make_execute_chain()
-
-        with (
-            patch("backend.supabase_client.get_supabase", return_value=client_mock),
-            patch("asyncio.to_thread", new=AsyncMock(return_value=execute_result)),
-        ):
+        """create_run generates a UUID run_id and inserts via the pooler."""
+        with patch("backend.supabase_client._sql_execute", new=AsyncMock()) as sql_exec:
             from backend.supabase_client import create_run
+
             run_id = await create_run(
                 repo_url="https://github.com/owner/repo",
                 issue_url=None,
@@ -108,26 +127,15 @@ class TestCreateRun:
                 github_token_hint="ghp_faketoken1234",
             )
 
-        # Should return a valid UUID
         assert uuid.UUID(run_id)
+        sql_exec.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_stores_only_last_four_chars_of_token(self):
         """create_run stores only the last 4 characters of the github token."""
-        client_mock, execute_result = _make_execute_chain()
-        inserted_payloads = []
-
-        def capture_insert(data):
-            inserted_payloads.append(data)
-            return client_mock.table.return_value
-
-        client_mock.table.return_value.insert.side_effect = capture_insert
-
-        with (
-            patch("backend.supabase_client.get_supabase", return_value=client_mock),
-            patch("asyncio.to_thread", new=AsyncMock(return_value=execute_result)),
-        ):
+        with patch("backend.supabase_client._sql_execute", new=AsyncMock()) as sql_exec:
             from backend.supabase_client import create_run
+
             await create_run(
                 repo_url="https://github.com/owner/repo",
                 issue_url=None,
@@ -135,39 +143,36 @@ class TestCreateRun:
                 github_token_hint="ghp_secrettoken123ABCD",
             )
 
-        # The full token must NOT appear anywhere in the inserted data
-        if inserted_payloads:
-            payload_str = str(inserted_payloads)
-            assert "ghp_secrettoken123ABCD" not in payload_str
-            assert "ABCD" in payload_str  # last 4 chars are stored
+        params = sql_exec.await_args.args[1]
+        payload_str = str(params)
+        assert "ghp_secrettoken123ABCD" not in payload_str
+        assert "ABCD" in payload_str
 
     @pytest.mark.asyncio
-    async def test_raises_on_supabase_error(self):
-        """create_run raises on PostgREST business errors (no SQL fallback)."""
+    async def test_raises_when_sql_and_rest_fail(self):
+        """create_run raises the pooler error when REST also fails."""
         from backend.supabase_client import create_run
 
-        with patch(
-            "asyncio.to_thread",
-            new=AsyncMock(side_effect=Exception("PGRST204 Could not find the table")),
+        with (
+            patch(
+                "backend.supabase_client._sql_execute",
+                new=AsyncMock(side_effect=RuntimeError("pooler insert failed")),
+            ),
+            patch("backend.supabase_client.get_supabase", return_value=MagicMock()),
+            patch(
+                "asyncio.to_thread",
+                new=AsyncMock(side_effect=Exception("PGRST204 Could not find the table")),
+            ),
         ):
-            with patch("backend.supabase_client.get_supabase", return_value=MagicMock()):
-                with pytest.raises(Exception, match="PGRST204"):
-                    await create_run("https://github.com/o/r", None, None, "ghp_x")
+            with pytest.raises(RuntimeError, match="pooler insert failed"):
+                await create_run("https://github.com/o/r", None, None, "ghp_x")
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_postgres_on_cloudflare_522(self):
-        """Modal often gets Cloudflare 522 HTML from REST; insert via the pooler."""
-        class GatewayError(Exception):
-            code = 522
-
-            def __str__(self) -> str:
-                return "JSON could not be generated"
-
-        client_mock, _ = _make_execute_chain()
+    async def test_uses_postgres_without_waiting_on_rest(self):
+        """SQL insert is the primary path; REST 521/522 must not block it."""
         with (
-            patch("backend.supabase_client.get_supabase", return_value=client_mock),
-            patch("asyncio.to_thread", new=AsyncMock(side_effect=GatewayError())),
             patch("backend.supabase_client._sql_execute", new=AsyncMock()) as sql_exec,
+            patch("backend.supabase_client.get_supabase") as get_client,
         ):
             from backend.supabase_client import create_run
 
@@ -176,35 +181,26 @@ class TestCreateRun:
             )
 
         assert uuid.UUID(run_id)
-        sql_exec.assert_awaited()
+        sql_exec.assert_awaited_once()
+        get_client.assert_not_called()
+        query = sql_exec.await_args.args[0]
+        assert "::run_status" in query
 
 
 class TestUpdateRunStatus:
     @pytest.mark.asyncio
     async def test_sets_valid_iso_timestamp_in_updated_at(self):
         """update_run_status sets updated_at to a valid ISO 8601 timestamp."""
-        client_mock, execute_result = _make_execute_chain()
-        captured_payloads = []
-
-        def capture_update(data):
-            captured_payloads.append(data)
-            return client_mock.table.return_value
-
-        client_mock.table.return_value.update.side_effect = capture_update
-
-        with (
-            patch("backend.supabase_client.get_supabase", return_value=client_mock),
-            patch("asyncio.to_thread", new=AsyncMock(return_value=execute_result)),
-        ):
+        with patch("backend.supabase_client._sql_execute", new=AsyncMock()) as sql_exec:
             from backend.supabase_client import update_run_status
+
             await update_run_status("run-123", "running", "planner")
 
-        if captured_payloads:
-            ts = captured_payloads[0].get("updated_at", "")
-            # ISO format: 2026-08-12T...
-            assert re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", ts), (
-                f"updated_at is not a valid ISO timestamp: {ts!r}"
-            )
+        params = sql_exec.await_args.args[1]
+        ts = params[2]
+        assert re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", ts), (
+            f"updated_at is not a valid ISO timestamp: {ts!r}"
+        )
 
 
 class TestSaveAgentOutput:
@@ -216,6 +212,7 @@ class TestSaveAgentOutput:
         with (
             patch("backend.supabase_client.get_supabase", return_value=client_mock),
             patch("asyncio.to_thread", new=AsyncMock(return_value=execute_result)),
+            patch("backend.supabase_client._sql_execute", new=AsyncMock()),
         ):
             from backend.supabase_client import save_agent_output
             await save_agent_output("run-123", "planner", {"key": "val"}, "start")
@@ -232,6 +229,7 @@ class TestCreateCheckpoint:
         with (
             patch("backend.supabase_client.get_supabase", return_value=client_mock),
             patch("asyncio.to_thread", new=AsyncMock(return_value=execute_result)),
+            patch("backend.supabase_client._sql_execute", new=AsyncMock()),
         ):
             from backend.supabase_client import create_checkpoint
             checkpoint_id = await create_checkpoint(
@@ -257,6 +255,7 @@ class TestResolveCheckpoint:
         with (
             patch("backend.supabase_client.get_supabase", return_value=client_mock),
             patch("asyncio.to_thread", new=AsyncMock(return_value=execute_result)),
+            patch("backend.supabase_client._sql_execute", new=AsyncMock()),
         ):
             from backend.supabase_client import resolve_checkpoint
             await resolve_checkpoint("run-123", "hitl_1", {"action": "approve"})
@@ -281,6 +280,12 @@ class TestSearchCodeEmbeddings:
         with (
             patch("backend.supabase_client.get_supabase", return_value=client_mock),
             patch("asyncio.to_thread", new=AsyncMock(return_value=rpc_execute_result)),
+            patch(
+                "backend.supabase_client._sql_fetchall",
+                new=AsyncMock(
+                    return_value=[{"file_path": "backend/main.py", "similarity": 0.92}]
+                ),
+            ),
         ):
             from backend.supabase_client import search_code_embeddings
             results = await search_code_embeddings(

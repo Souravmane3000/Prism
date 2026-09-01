@@ -50,10 +50,10 @@ def mock_db_for_start():
         patch(
             "backend.routers.runs.create_run",
             new=AsyncMock(return_value="run-00000000-0000-0000-0000-000000000001"),
-        ),
-        patch("backend.routers.runs._schedule_pipeline", new=MagicMock()),
+        ) as create_run_mock,
+        patch("backend.routers.runs._schedule_pipeline", new=MagicMock()) as schedule_mock,
     ):
-        yield
+        yield {"create_run": create_run_mock, "schedule": schedule_mock}
 
 
 @pytest.fixture()
@@ -113,6 +113,37 @@ class TestStartRun:
         assert "run_id" in data
         assert "status" in data
         assert "current_agent" in data
+
+    def test_success_schedules_pipeline_without_echoing_pat(
+        self, test_client, mock_db_for_start
+    ):
+        """201 queues the graph off-request and never returns the GitHub PAT."""
+        response = test_client.post("/api/runs/start", json=VALID_START_BODY)
+        assert response.status_code == 201
+        assert "ghp_faketoken1234567890" not in response.text
+        schedule = mock_db_for_start["schedule"]
+        schedule.assert_called_once()
+        args = schedule.call_args.args
+        assert args[0] == "run-00000000-0000-0000-0000-000000000001"
+        assert args[1] == VALID_START_BODY["github_token"]
+
+    def test_create_run_failure_returns_db_error_envelope(self, test_client):
+        """Frontend parses detail.error.code/message when init fails."""
+        with (
+            patch(
+                "backend.routers.runs.create_run",
+                new=AsyncMock(side_effect=RuntimeError("pooler down")),
+            ),
+            patch("backend.routers.runs._schedule_pipeline", new=MagicMock()) as schedule,
+        ):
+            response = test_client.post("/api/runs/start", json=VALID_START_BODY)
+        assert response.status_code == 500
+        err = response.json()["detail"]["error"]
+        assert err["code"] == "db_error"
+        assert err["message"] == "Failed to initialise run"
+        assert err["details"]["exception_type"] == "RuntimeError"
+        assert "pooler down" not in response.text
+        schedule.assert_not_called()
 
 
 class TestGetRunStatus:
