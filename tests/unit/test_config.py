@@ -95,6 +95,22 @@ class TestSettings:
         assert "postgres%2E" not in out
         assert "Supabase123%2A" in out
 
+    def test_postgres_connect_kwargs_keeps_pooler_user_and_star_password(self):
+        from backend.config import postgres_connect_kwargs, settings
+
+        url = (
+            "postgresql://postgres.myref:Supabase123*"
+            "@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres"
+        )
+        with patch.object(settings, "supabase_db_url", url):
+            kwargs = postgres_connect_kwargs()
+        assert kwargs["user"] == "postgres.myref"
+        assert kwargs["password"] == "Supabase123*"
+        assert kwargs["host"] == "aws-0-ap-northeast-2.pooler.supabase.com"
+        assert kwargs["port"] == 5432
+        assert kwargs["sslmode"] == "require"
+        assert kwargs["prepare_threshold"] == 0
+
     def test_parse_frontend_origins_splits_and_strips(self):
         from backend.config import parse_frontend_origins
 

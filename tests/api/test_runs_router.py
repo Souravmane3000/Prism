@@ -36,6 +36,7 @@ def test_client():
     ):
         from backend.main import app
         with (
+            patch("backend.main.ping_postgres", new=AsyncMock()),
             patch("backend.routers.runs.get_compiled_graph", new=AsyncMock(return_value=MagicMock())),
             TestClient(app, raise_server_exceptions=False) as client,
         ):

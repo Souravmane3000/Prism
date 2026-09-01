@@ -9,6 +9,7 @@ module-level so that auto-tracing activates for every subsequent LangGraph run.
 import logging
 import os
 import re
+from typing import Any
 from urllib.parse import quote, urlparse, urlunparse
 
 from dotenv import load_dotenv
@@ -76,6 +77,29 @@ def normalize_psycopg_conninfo(raw: str) -> str:
     port = f":{parsed.port}" if parsed.port else ""
     netloc = f"{username}:{password}@{host}{port}"
     return urlunparse(parsed._replace(netloc=netloc))
+
+
+def postgres_connect_kwargs() -> dict[str, Any]:
+    """
+    Keyword args for psycopg / psycopg_pool.
+
+    URI conninfo plus percent-encoding drops pooler tenant users
+    (postgres.<project-ref>) and breaks passwords that contain '*'.
+    """
+    raw = settings.supabase_db_url.strip().replace(
+        "postgresql+psycopg://", "postgresql://", 1
+    )
+    parsed = urlparse(raw)
+    return {
+        "host": parsed.hostname or "",
+        "port": parsed.port or 5432,
+        "user": parsed.username or "postgres",
+        "password": parsed.password or "",
+        "dbname": (parsed.path or "/postgres").lstrip("/") or "postgres",
+        "autocommit": True,
+        "prepare_threshold": 0,
+        "sslmode": "require",
+    }
 
 
 def parse_frontend_origins(raw: str) -> list[str]:

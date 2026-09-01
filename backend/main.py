@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import cors_allow_origin_regex, parse_frontend_origins, settings
 from backend.graph import get_compiled_graph
 from backend.routers.runs import router
-from backend.supabase_client import get_supabase
+from backend.supabase_client import ping_postgres
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +33,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     logger.info("Prism starting — environment=%s", settings.environment)
 
-    # ── Verify Supabase connectivity ──────────────────────────────────────────
+    # ── Verify Postgres (session pooler) ──────────────────────────────────────
+    # Do not gate startup on *.supabase.co REST. Modal regions often receive
+    # Cloudflare 522 HTML from that path while the IPv4 pooler still works.
     try:
-        client = get_supabase()
-        result = client.table("runs").select("id").limit(1).execute()
-        logger.info("Supabase connection verified — url=%s", settings.supabase_url)
+        await ping_postgres()
+        logger.info("Postgres pooler verified")
     except Exception as exc:
-        logger.error("Supabase connectivity check failed: %s", exc, exc_info=True)
-        # Non-fatal in development; fatal in production
+        logger.error("Postgres pooler check failed: %s", exc, exc_info=True)
         if settings.environment == "production":
-            raise exc
+            raise
 
     # ── Verify OpenAI API reachability ────────────────────────────────────────
     try:

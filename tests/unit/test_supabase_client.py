@@ -75,6 +75,20 @@ class TestTransientHttpError:
         )
         assert not is_transient_http_error(ValueError("bad json"))
 
+    def test_detects_cloudflare_522_html(self):
+        from backend.supabase_client import is_rest_gateway_error, should_use_sql_fallback
+
+        class ApiError(Exception):
+            code = 522
+
+            def __str__(self) -> str:
+                return "JSON could not be generated"
+
+        err = ApiError()
+        assert is_rest_gateway_error(err)
+        assert should_use_sql_fallback(err)
+        assert not should_use_sql_fallback(Exception("PGRST204 Could not find the table"))
+
 
 class TestCreateRun:
     @pytest.mark.asyncio
@@ -129,15 +143,40 @@ class TestCreateRun:
 
     @pytest.mark.asyncio
     async def test_raises_on_supabase_error(self):
-        """create_run raises when the Supabase call fails."""
+        """create_run raises on PostgREST business errors (no SQL fallback)."""
         from backend.supabase_client import create_run
 
         with patch(
-            "asyncio.to_thread", new=AsyncMock(side_effect=Exception("Connection refused"))
+            "asyncio.to_thread",
+            new=AsyncMock(side_effect=Exception("PGRST204 Could not find the table")),
         ):
             with patch("backend.supabase_client.get_supabase", return_value=MagicMock()):
-                with pytest.raises(Exception, match="Connection refused"):
+                with pytest.raises(Exception, match="PGRST204"):
                     await create_run("https://github.com/o/r", None, None, "ghp_x")
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_postgres_on_cloudflare_522(self):
+        """Modal often gets Cloudflare 522 HTML from REST; insert via the pooler."""
+        class GatewayError(Exception):
+            code = 522
+
+            def __str__(self) -> str:
+                return "JSON could not be generated"
+
+        client_mock, _ = _make_execute_chain()
+        with (
+            patch("backend.supabase_client.get_supabase", return_value=client_mock),
+            patch("asyncio.to_thread", new=AsyncMock(side_effect=GatewayError())),
+            patch("backend.supabase_client._sql_execute", new=AsyncMock()) as sql_exec,
+        ):
+            from backend.supabase_client import create_run
+
+            run_id = await create_run(
+                "https://github.com/o/r", None, "Fix the bug", "ghp_xxxx"
+            )
+
+        assert uuid.UUID(run_id)
+        sql_exec.assert_awaited()
 
 
 class TestUpdateRunStatus:

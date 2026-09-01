@@ -19,6 +19,7 @@ def test_client():
                 ))
             ))
         )),
+        patch("backend.supabase_client.ping_postgres", new=AsyncMock()),
         patch("backend.graph.get_compiled_graph", new=AsyncMock(return_value=MagicMock())),
         patch("httpx.AsyncClient", return_value=MagicMock(
             __aenter__=AsyncMock(return_value=MagicMock(
@@ -28,7 +29,10 @@ def test_client():
         )),
     ):
         from backend.main import app
-        with TestClient(app, raise_server_exceptions=False) as client:
+        with (
+            patch("backend.main.ping_postgres", new=AsyncMock()),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
             yield client
 
 

@@ -15,7 +15,6 @@ request boundary between POST /start and POST /approve.
 """
 
 import logging
-from urllib.parse import urlparse
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
@@ -29,7 +28,7 @@ from backend.agents.implementation_planner import implementation_planner_node
 from backend.agents.planner import planner_node
 from backend.agents.pr_summarizer import pr_summarizer_node
 from backend.agents.test_runner import test_runner_node
-from backend.config import settings
+from backend.config import postgres_connect_kwargs
 from backend.state import PrismState
 
 logger = logging.getLogger(__name__)
@@ -101,22 +100,13 @@ async def get_checkpointer() -> AsyncPostgresSaver:
     AsyncPostgresSaver instance that can be owned by the module-level compiled graph.
     The pool outlives this function; its lifetime is tied to _compiled_graph.
     """
-    raw = settings.supabase_db_url.strip().replace(
-        "postgresql+psycopg://", "postgresql://", 1
-    )
-    parsed = urlparse(raw)
-    user = parsed.username or "postgres"
-    host = parsed.hostname or ""
-    port = parsed.port or 5432
-    dbname = (parsed.path or "/postgres").lstrip("/") or "postgres"
-    # Keyword params keep pooler tenant users (postgres.<ref>) and raw passwords
-    # (e.g. '*') intact. URI conninfo plus percent-encoding was failing auth on Modal.
+    kwargs = postgres_connect_kwargs()
     logger.info(
         "[graph] Opening Postgres pool — host=%s port=%s user=%s db=%s",
-        host,
-        port,
-        user,
-        dbname,
+        kwargs["host"],
+        kwargs["port"],
+        kwargs["user"],
+        kwargs["dbname"],
     )
 
     pool = AsyncConnectionPool(
@@ -125,16 +115,7 @@ async def get_checkpointer() -> AsyncPostgresSaver:
         max_size=5,
         timeout=10,
         reconnect_timeout=0,
-        kwargs={
-            "host": host,
-            "port": port,
-            "user": user,
-            "password": parsed.password or "",
-            "dbname": dbname,
-            "autocommit": True,
-            "prepare_threshold": 0,
-            "sslmode": "require",
-        },
+        kwargs=kwargs,
         open=False,
     )
     try:
