@@ -236,3 +236,16 @@ class TestClassifyTestResults:
         page = (ROOT / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
         assert "setApprovedCheckpoint(null)" not in page
         assert "resolvedCheckpoints" in page
+
+    def test_inspector_merges_agent_outputs_when_api_output_is_empty(self):
+        src = TS_OUTPUT.read_text(encoding="utf-8")
+        assert "export function materializeRunOutput" in src
+        realtime = (ROOT / "frontend" / "lib" / "useSupabaseRealtime.ts").read_text(
+            encoding="utf-8"
+        )
+        assert "hydrateFromSupabase" in realtime
+        assert "setTimeout(() => unsubscribe(), 2000)" not in realtime
+        vis = (ROOT / "frontend" / "lib" / "hitlVisibility.ts").read_text(
+            encoding="utf-8"
+        )
+        assert "laterPipelineAgentCompleted" in vis

@@ -15,7 +15,9 @@ import AgentCard from "@/components/stream/AgentCard";
 import HITLCard from "@/components/stream/HITLCard";
 import {
   PIPELINE_ORDER,
+  firstLaterCompleteAt,
   isHitlResolved,
+  laterPipelineAgentCompleted,
   shouldRenderHitlCard,
 } from "@/lib/hitlVisibility";
 import type {
@@ -231,7 +233,10 @@ export default function ActivityStream({
             checkpointPayload,
             runStatus,
           );
-          const isComplete = !!entry?.completeRow || hitlResolved;
+          const inferredComplete =
+            agent !== "debugger" && laterPipelineAgentCompleted(agent, agentMap);
+          const isComplete =
+            !!entry?.completeRow || hitlResolved || inferredComplete;
           const isError =
             runStatus?.current_agent === agent && !!runStatus?.error;
 
@@ -239,7 +244,8 @@ export default function ActivityStream({
           const isDebuggerSkipped =
             agent === "debugger" &&
             !agentMap.get("debugger") &&
-            seenAgents.has("pr_summarizer");
+            (seenAgents.has("pr_summarizer") ||
+              !!agentMap.get("pr_summarizer")?.completeRow);
 
           if (
             shouldRenderHitlCard(
@@ -292,7 +298,10 @@ export default function ActivityStream({
                     : null
               }
               startedAt={entry?.startRow?.created_at ?? null}
-              completedAt={entry?.completeRow?.created_at ?? null}
+              completedAt={
+                entry?.completeRow?.created_at ??
+                (isComplete ? firstLaterCompleteAt(agent, agentMap) : null)
+              }
               isRunning={isRunning && !hitlResolved}
               isSkipped={isDebuggerSkipped}
               isError={isError}

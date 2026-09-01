@@ -337,3 +337,106 @@ class TestGetRunOutput:
         assert data["pr_draft"]["review_checklist"] == ["Check min_length"]
         assert data["test_results"]["failed"] == []
         assert data["all_tests_passed"] is True
+
+    def test_empty_checkpoint_does_not_wipe_agent_output_fields(self, test_client):
+        """Blank LangGraph values must not clobber planner/file_map already in agent_outputs."""
+        run_data = {
+            "id": "run-001",
+            "status": "completed",
+            "current_agent": "pr_summarizer",
+            "repo_url": "https://github.com/tiangolo/fastapi",
+            "issue_url": None,
+            "issue_text": "Add validation",
+            "all_tests_passed": True,
+            "error": None,
+            "pr_url": None,
+        }
+        outputs = [
+            {
+                "phase": "complete",
+                "agent": "planner",
+                "payload": {
+                    "subtasks": [
+                        {
+                            "id": "st-1",
+                            "title": "Add field",
+                            "description": "desc",
+                            "dependencies": [],
+                            "likely_files": ["app.py"],
+                            "complexity": "low",
+                        }
+                    ]
+                },
+            },
+            {
+                "phase": "complete",
+                "agent": "code_navigator",
+                "payload": {
+                    "file_map": {
+                        "st-1": [
+                            {
+                                "path": "app.py",
+                                "relevance_score": 0.9,
+                                "source": "github",
+                            }
+                        ]
+                    }
+                },
+            },
+            {
+                "phase": "complete",
+                "agent": "pr_summarizer",
+                "payload": {
+                    "pr_draft": {
+                        "title": "Add field",
+                        "body": "Adds the field",
+                        "what_changed": "app.py",
+                        "why": "issue",
+                        "testing_notes": "n/a",
+                        "limitations": "none",
+                        "review_checklist": ["Check types"],
+                    }
+                },
+            },
+        ]
+        mock_graph = MagicMock()
+        mock_snapshot = MagicMock()
+        mock_snapshot.values = {
+            "subtasks": [],
+            "file_map": {},
+            "implementation_plan": [],
+            "pr_draft": None,
+            "test_results": None,
+            "debug_report": None,
+        }
+        mock_graph.aget_state = AsyncMock(return_value=mock_snapshot)
+
+        with (
+            patch("backend.routers.runs.get_run", new=AsyncMock(return_value=run_data)),
+            patch(
+                "backend.routers.runs.get_run_outputs",
+                new=AsyncMock(return_value=outputs),
+            ),
+            patch(
+                "backend.graph.get_compiled_graph",
+                new=AsyncMock(return_value=mock_graph),
+            ),
+        ):
+            response = test_client.get("/api/runs/run-001/output")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["subtasks"][0]["id"] == "st-1"
+        assert "app.py" in [e["path"] for e in data["file_map"]["st-1"]]
+        assert data["pr_draft"]["title"] == "Add field"
+
+
+class TestPickRicher:
+    def test_blank_checkpoint_does_not_clobber_outputs(self):
+        from backend.routers.runs import _pick_richer
+
+        subtasks = [{"id": "st-1", "title": "x"}]
+        assert _pick_richer("subtasks", subtasks, []) == subtasks
+        assert _pick_richer("file_map", {"st-1": [{"path": "a.py"}]}, {}) == {
+            "st-1": [{"path": "a.py"}]
+        }

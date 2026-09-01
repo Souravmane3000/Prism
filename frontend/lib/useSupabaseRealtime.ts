@@ -25,12 +25,6 @@ import type {
   RunStatus,
 } from "@/lib/types";
 
-const TERMINAL_STATUSES: Set<RunStatus> = new Set([
-  "completed",
-  "failed",
-  "cancelled",
-]);
-
 const POLL_MS = 2500;
 
 type RealtimeChannel = ReturnType<
@@ -156,7 +150,7 @@ function synthesizeAgentOutputs(output: RunOutputResponse): AgentOutputRow[] {
 
 function checkpointFromOutput(
   runId: string,
-  status: Awaited<ReturnType<typeof getRunStatus>>,
+  status: { status: RunStatus; current_agent: string },
   output: RunOutputResponse,
 ): CheckpointRow | null {
   if (status.status !== "awaiting_approval") return null;
@@ -211,48 +205,8 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
 
     const supabase = getSupabaseClient();
 
-    async function pollOnce(): Promise<void> {
-      try {
-        const [status, output] = await Promise.all([
-          getRunStatus(id),
-          getRunOutput(id),
-        ]);
-        setRunStatus(statusToRunRow(id, status));
-        setAgentOutputs((prev) =>
-          mergeAgentOutputs(prev, synthesizeAgentOutputs(output)),
-        );
-        const fromOutput = checkpointFromOutput(id, status, output);
-        if (fromOutput) {
-          setCheckpointPayload(fromOutput);
-        } else if (status.status !== "awaiting_approval") {
-          setCheckpointPayload((prev) => {
-            if (!prev || prev.user_decision != null) return prev;
-            return {
-              ...prev,
-              user_decision: { action: "approve" },
-              resolved_at: prev.resolved_at ?? new Date().toISOString(),
-            };
-          });
-        }
-      } catch {
-        // Polling is best-effort; the next tick retries.
-      }
-    }
-
-    const pollTimer = window.setInterval(() => {
-      void pollOnce();
-    }, POLL_MS);
-    void pollOnce();
-
-    if (!supabase) {
-      setTransport("poll");
-      return () => window.clearInterval(pollTimer);
-    }
-
-    setTransport("realtime");
-    const channelName = `prism:run:${id}`;
-
-    void (async () => {
+    async function hydrateFromSupabase(): Promise<void> {
+      if (!supabase) return;
       try {
         const [runRes, outputsRes, checkpointRes] = await Promise.all([
           supabase.from("runs").select("*").eq("id", id).maybeSingle(),
@@ -288,9 +242,65 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
           setCheckpointPayload(row);
         }
       } catch {
-        // Initial hydrate failed; polling still updates status.
+        // REST hydrate is best-effort; polling still updates status.
       }
-    })();
+    }
+
+    let pollInFlight = false;
+    async function pollOnce(): Promise<void> {
+      if (pollInFlight) return;
+      pollInFlight = true;
+      try {
+        await hydrateFromSupabase();
+
+        try {
+          const status = await getRunStatus(id);
+          setRunStatus(statusToRunRow(id, status));
+        } catch {
+          // Status poll is independent of output so a slow GET /output
+          // cannot freeze the header or stream.
+        }
+
+        try {
+          const output = await getRunOutput(id);
+          setAgentOutputs((prev) =>
+            mergeAgentOutputs(prev, synthesizeAgentOutputs(output)),
+          );
+          const fromOutput = checkpointFromOutput(id, output, output);
+          if (fromOutput) {
+            setCheckpointPayload(fromOutput);
+          } else if (output.status !== "awaiting_approval") {
+            setCheckpointPayload((prev) => {
+              if (!prev || prev.user_decision != null) return prev;
+              return {
+                ...prev,
+                user_decision: { action: "approve" },
+                resolved_at: prev.resolved_at ?? new Date().toISOString(),
+              };
+            });
+          }
+        } catch {
+          // Output poll is best-effort; agent_outputs hydrate above is primary.
+        }
+      } finally {
+        pollInFlight = false;
+      }
+    }
+
+    const pollTimer = window.setInterval(() => {
+      void pollOnce();
+    }, POLL_MS);
+    void pollOnce();
+
+    if (!supabase) {
+      setTransport("poll");
+      return () => window.clearInterval(pollTimer);
+    }
+
+    setTransport("realtime");
+    const channelName = `prism:run:${id}`;
+
+    void hydrateFromSupabase();
 
     try {
       const channel = supabase
@@ -307,10 +317,6 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
             const row = payload.new as RunRow;
             if (!row) return;
             setRunStatus(row);
-
-            if (TERMINAL_STATUSES.has(row.status)) {
-              setTimeout(() => unsubscribe(), 2000);
-            }
           },
         )
         .on(
@@ -353,6 +359,7 @@ export function useSupabaseRealtime(runId: string | null): RealtimeState {
             setTransport("realtime");
           } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
             setIsConnected(false);
+            setTransport("poll");
           }
         });
 

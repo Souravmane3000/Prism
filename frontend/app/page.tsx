@@ -18,7 +18,7 @@
 
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Header from "@/components/layout/Header";
 import MainLayout from "@/components/layout/MainLayout";
 import Sidebar from "@/components/layout/Sidebar";
@@ -27,6 +27,7 @@ import ActivityStream from "@/components/stream/ActivityStream";
 import OutputInspector from "@/components/output/OutputInspector";
 import { useSupabaseRealtime } from "@/lib/useSupabaseRealtime";
 import { getRunOutput } from "@/lib/api";
+import { materializeRunOutput } from "@/lib/output";
 import type {
   RunOutputResponse,
   RunStatus,
@@ -192,6 +193,16 @@ export default function PrismWorkspace() {
 
   const currentRunStatus = runStatus?.status ?? runOutput?.status ?? null;
 
+  const displayOutput = useMemo(() => {
+    if (!activeRunId) return null;
+    return materializeRunOutput(
+      activeRunId,
+      runStatus,
+      agentOutputs,
+      runOutput,
+    );
+  }, [activeRunId, runStatus, agentOutputs, runOutput]);
+
   return (
     <>
       {/* Top navigation bar */}
@@ -220,8 +231,8 @@ export default function PrismWorkspace() {
               runStatus={runStatus}
               agentOutputs={agentOutputs}
               checkpointPayload={checkpointPayload}
-              outputSubtasks={runOutput?.subtasks ?? []}
-              outputPlan={runOutput?.implementation_plan ?? []}
+              outputSubtasks={displayOutput?.subtasks ?? []}
+              outputPlan={displayOutput?.implementation_plan ?? []}
               pat={pat}
               resolvedCheckpoints={resolvedCheckpoints}
               onApproved={handleApproved}
@@ -230,7 +241,7 @@ export default function PrismWorkspace() {
           }
           inspector={
             <OutputInspector
-              runOutput={runOutput}
+              runOutput={displayOutput}
               runId={activeRunId}
               runStatus={currentRunStatus}
               pat={pat}

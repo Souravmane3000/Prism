@@ -271,8 +271,21 @@ def _is_full_debug_report(val: Any) -> bool:
     return isinstance(val, dict) and isinstance(val.get("fixes"), list)
 
 
+def _is_blank(val: Any) -> bool:
+    """True for None / empty collections so they cannot clobber real agent output."""
+    if val is None:
+        return True
+    if val == "" or val == [] or val == {}:
+        return True
+    return False
+
+
 def _pick_richer(key: str, from_outputs: Any, from_checkpoint: Any) -> Any:
-    """Prefer the complete object when agent_outputs historically stored a summary."""
+    """Prefer the complete object when agent_outputs historically stored a summary.
+
+    Empty checkpoint values ([], {}, None) must not wipe planner subtasks,
+    file_map, or a PR draft that already landed in agent_outputs.
+    """
     if key == "pr_draft":
         if _is_full_pr_draft(from_checkpoint):
             return from_checkpoint
@@ -288,9 +301,14 @@ def _pick_richer(key: str, from_outputs: Any, from_checkpoint: Any) -> Any:
             return from_checkpoint
         if _is_full_debug_report(from_outputs):
             return from_outputs
-    if from_checkpoint is not None:
+    if _is_blank(from_checkpoint):
+        return from_outputs
+    if _is_blank(from_outputs):
         return from_checkpoint
-    return from_outputs
+    return from_checkpoint
+
+
+_CHECKPOINT_LOAD_TIMEOUT_SECONDS = 5.0
 
 
 async def _load_checkpoint_values(run_id: str) -> dict[str, Any]:
@@ -299,6 +317,9 @@ async def _load_checkpoint_values(run_id: str) -> dict[str, Any]:
 
     Agent output rows are the Realtime/UI denormalised copy. The checkpointer
     holds the full PrismState, which older agent payloads truncated.
+
+    Timed out so GET /output still returns agent_outputs when the checkpointer
+    pool is busy (file_contents snapshots can stall aget_state).
     """
     try:
         # Late import so tests that patch backend.graph.get_compiled_graph apply.
@@ -306,10 +327,20 @@ async def _load_checkpoint_values(run_id: str) -> dict[str, Any]:
 
         graph = await load_graph()
         maybe = graph.aget_state({"configurable": {"thread_id": run_id}})
-        snapshot = await maybe if inspect.isawaitable(maybe) else maybe
+        if inspect.isawaitable(maybe):
+            snapshot = await asyncio.wait_for(
+                maybe, timeout=_CHECKPOINT_LOAD_TIMEOUT_SECONDS
+            )
+        else:
+            snapshot = maybe
         values = getattr(snapshot, "values", None)
         if isinstance(values, dict):
             return dict(values)
+    except TimeoutError:
+        logger.warning(
+            "[runs] Timed out reading graph checkpoint for %s — using agent_outputs",
+            run_id,
+        )
     except Exception as exc:
         logger.warning("[runs] Could not read graph checkpoint for %s: %s", run_id, exc)
     return {}

@@ -160,7 +160,9 @@ export default function AgentCard({
                 ? String(payload.error ?? "An error occurred")
                 : isComplete && summary
                   ? summary
-                  : AGENT_DESCRIPTIONS[agent]}
+                  : isComplete
+                    ? "Completed"
+                    : AGENT_DESCRIPTIONS[agent]}
           </p>
         </div>
       </div>

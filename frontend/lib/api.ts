@@ -149,7 +149,9 @@ export function getRunStatus(runId: string): Promise<RunStatusResponse> {
  * Returns the full accumulated pipeline output for a run.
  */
 export function getRunOutput(runId: string): Promise<RunOutputResponse> {
-  return request<RunOutputResponse>(`/api/runs/${runId}/output`);
+  return request<RunOutputResponse>(`/api/runs/${runId}/output`, {
+    timeoutMs: START_TIMEOUT_MS,
+  });
 }
 
 /**

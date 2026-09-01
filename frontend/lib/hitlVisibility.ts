@@ -50,6 +50,30 @@ export function isTerminalRunStatus(
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 
+export function laterPipelineAgentCompleted(
+  agent: AgentName,
+  agentMap: AgentMap,
+): boolean {
+  const idx = PIPELINE_ORDER.indexOf(agent);
+  if (idx < 0) return false;
+  return PIPELINE_ORDER.slice(idx + 1).some(
+    (name) => !!agentMap.get(name)?.completeRow,
+  );
+}
+
+export function firstLaterCompleteAt(
+  agent: AgentName,
+  agentMap: AgentMap,
+): string | null {
+  const idx = PIPELINE_ORDER.indexOf(agent);
+  if (idx < 0) return null;
+  for (const name of PIPELINE_ORDER.slice(idx + 1)) {
+    const at = agentMap.get(name)?.completeRow?.created_at;
+    if (at) return at;
+  }
+  return null;
+}
+
 export function laterAgentsStarted(
   agent: "hitl_1" | "hitl_2",
   agentMap: AgentMap,
