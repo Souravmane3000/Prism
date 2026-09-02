@@ -290,8 +290,8 @@ export default function PRDraftTab({
         >
           <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />
           <p
-            className="min-w-0 flex-1 whitespace-pre-wrap break-all"
-            style={{ overflowWrap: "anywhere" }}
+            className="min-w-0 flex-1 whitespace-pre-wrap"
+            style={{ overflowWrap: "break-word", wordBreak: "normal" }}
           >
             {error}
           </p>

@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from github.GithubException import GithubException
 
+import backend.config  # noqa: F401 — LangSmith env before LangGraph
 from backend.github_client import (
     commit_file,
     create_branch,
@@ -52,6 +53,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 _GRAPH_TRANSIENT_ATTEMPTS = 3
 _HITL_NODES = frozenset({"hitl_1", "hitl_2"})
+
+
+def _graph_run_config(run_id: str, github_token: str) -> dict[str, Any]:
+    """LangGraph config: thread, PAT, and LangSmith run identity."""
+    short_id = run_id[:8]
+    return {
+        "run_name": f"prism:{short_id}",
+        "tags": ["prism", f"run:{short_id}"],
+        "metadata": {"prism_run_id": run_id},
+        "configurable": {
+            "thread_id": run_id,
+            "github_token": github_token,
+        },
+    }
 
 
 def _paused_hitl_node(snapshot: Any) -> Optional[str]:
@@ -493,12 +508,7 @@ async def _run_graph_background(
     logger.info("[runs] _run_graph_background STARTED — run_id=%s", run_id)
     try:
         graph = await get_compiled_graph()
-        config = {
-            "configurable": {
-                "thread_id": run_id,
-                "github_token": github_token,
-            }
-        }
+        config = _graph_run_config(run_id, github_token)
         logger.info("[runs] Starting graph.astream — run_id=%s", run_id)
         await _astream_with_retry(graph, initial_state, config, run_id)
         logger.info("[runs] graph.astream ended — run_id=%s", run_id)
@@ -540,12 +550,7 @@ async def _resume_graph_background(run_id: str, github_token: str) -> None:
     """
     try:
         graph = await get_compiled_graph()
-        config = {
-            "configurable": {
-                "thread_id": run_id,
-                "github_token": github_token,
-            }
-        }
+        config = _graph_run_config(run_id, github_token)
         await _astream_with_retry(graph, None, config, run_id)
 
         snapshot = await graph.aget_state(config)

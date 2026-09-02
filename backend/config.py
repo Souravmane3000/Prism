@@ -138,12 +138,57 @@ def origin_allowed_by_cors(origin: str, allowed_origins: list[str]) -> bool:
 
 settings = Settings()  # type: ignore[call-arg]
 
+
+def _strip_env_quotes(value: str) -> str:
+    return value.strip().strip('"').strip("'")
+
+
+def configure_langsmith_tracing() -> str:
+    """
+    Enable LangSmith for this process and return the project name.
+
+    Sets both LANGSMITH_* (current SDK) and LANGCHAIN_* (legacy) names.
+    Clears langsmith's lru_cached env lookups so a late call still wins
+    if LangGraph was imported before this module.
+    """
+    project = _strip_env_quotes(
+        os.environ.get("LANGCHAIN_PROJECT")
+        or os.environ.get("LANGSMITH_PROJECT")
+        or settings.langchain_project
+        or "prism"
+    )
+    if not project:
+        project = "prism"
+
+    endpoint = _strip_env_quotes(
+        os.environ.get("LANGSMITH_ENDPOINT")
+        or os.environ.get("LANGCHAIN_ENDPOINT")
+        or "https://api.smith.langchain.com"
+    )
+
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
+    os.environ["LANGSMITH_API_KEY"] = settings.langsmith_api_key
+    os.environ["LANGCHAIN_PROJECT"] = project
+    os.environ["LANGSMITH_PROJECT"] = project
+    os.environ["LANGCHAIN_ENDPOINT"] = endpoint
+    os.environ["LANGSMITH_ENDPOINT"] = endpoint
+
+    try:
+        from langsmith.utils import get_env_var, get_tracer_project
+
+        get_env_var.cache_clear()
+        get_tracer_project.cache_clear()
+    except Exception:
+        logger.debug("Could not clear langsmith env cache", exc_info=True)
+
+    return project
+
+
 # ── LangSmith auto-tracing setup ─────────────────────────────────────────────
 # Must happen at import time, before any LangChain import in other modules.
-os.environ["LANGCHAIN_TRACING_V2"] = "true"
-os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
-os.environ["LANGCHAIN_PROJECT"] = settings.langchain_project
-os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
+_langsmith_project = configure_langsmith_tracing()
 
 # ── Logging configuration ─────────────────────────────────────────────────────
 _log_level = logging.DEBUG if settings.environment == "development" else logging.INFO
@@ -166,7 +211,7 @@ for _noisy_logger in (
     logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
 
 logger.info(
-    "Prism config loaded — environment=%s project=%s",
+    "Prism config loaded — environment=%s langsmith_project=%s tracing=on",
     settings.environment,
-    settings.langchain_project,
+    _langsmith_project,
 )

@@ -51,8 +51,11 @@ async def run_pipeline(
     Detached pipeline worker. Spawned from POST /start and POST /approve so the
     HTTP response is not held open until the Planner (or later agents) finish.
     """
+    import backend.config  # noqa: F401, PLC0415 — tracing env before LangGraph
+    from backend.config import configure_langsmith_tracing  # noqa: PLC0415
     from backend.routers.runs import execute_pipeline_job  # noqa: PLC0415
 
+    configure_langsmith_tracing()
     await execute_pipeline_job(run_id, github_token, initial_state)
 
 

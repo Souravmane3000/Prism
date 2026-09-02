@@ -16,6 +16,9 @@ request boundary between POST /start and POST /approve.
 
 import logging
 
+import backend.config  # noqa: F401 — LangSmith env must exist before LangGraph loads
+from backend.config import postgres_connect_kwargs
+
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -28,7 +31,6 @@ from backend.agents.implementation_planner import implementation_planner_node
 from backend.agents.planner import planner_node
 from backend.agents.pr_summarizer import pr_summarizer_node
 from backend.agents.test_runner import test_runner_node
-from backend.config import postgres_connect_kwargs
 from backend.state import PrismState
 
 logger = logging.getLogger(__name__)

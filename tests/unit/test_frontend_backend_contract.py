@@ -265,10 +265,23 @@ class TestClassifyTestResults:
             encoding="utf-8"
         )
         assert 'base_branch: "main"' not in pr_tab
-        assert "overflowWrap" in pr_tab
+        assert 'overflowWrap: "break-word"' in pr_tab
+        assert "break-all" not in pr_tab
+        assert "anywhere" not in pr_tab
         assert "formatCreatePRError" in pr_tab
         hitl = (ROOT / "frontend" / "components" / "stream" / "HITLCard.tsx").read_text(
             encoding="utf-8"
         )
         assert "Checkpoint 1 of 2" in hitl
         assert "Checkpoint 2 of 2" in hitl
+        assert "break-all" not in hitl
+        graph_src = (ROOT / "backend" / "graph.py").read_text(encoding="utf-8")
+        assert graph_src.find("backend.config") < graph_src.find("from langgraph")
+        modal_src = (ROOT / "modal_app.py").read_text(encoding="utf-8")
+        assert "configure_langsmith_tracing" in modal_src
+        runs_src = (ROOT / "backend" / "routers" / "runs.py").read_text(encoding="utf-8")
+        assert "def _graph_run_config" in runs_src
+        assert '"run_name"' in runs_src
+        config_src = (ROOT / "backend" / "config.py").read_text(encoding="utf-8")
+        assert "LANGSMITH_TRACING" in config_src
+        assert "get_env_var.cache_clear" in config_src

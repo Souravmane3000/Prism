@@ -33,9 +33,28 @@ class TestSettings:
     def test_langsmith_env_vars_set_at_import(self):
         """LangSmith environment variables are injected into os.environ after import."""
         assert os.environ.get("LANGCHAIN_TRACING_V2") == "true"
-        assert os.environ.get("LANGCHAIN_PROJECT") == "prism"
-        assert os.environ.get("LANGCHAIN_ENDPOINT") == "https://api.smith.langchain.com"
+        assert os.environ.get("LANGSMITH_TRACING") == "true"
+        assert os.environ.get("LANGCHAIN_PROJECT") == os.environ.get("LANGSMITH_PROJECT")
+        assert os.environ.get("LANGCHAIN_PROJECT")
+        assert os.environ.get("LANGCHAIN_ENDPOINT")
+        assert os.environ.get("LANGSMITH_ENDPOINT")
         assert "LANGCHAIN_API_KEY" in os.environ
+        assert "LANGSMITH_API_KEY" in os.environ
+
+    def test_configure_langsmith_tracing_strips_quoted_project(self):
+        from backend.config import configure_langsmith_tracing
+
+        with patch.dict(
+            os.environ,
+            {"LANGSMITH_PROJECT": '"Prism"', "LANGCHAIN_PROJECT": ""},
+            clear=False,
+        ):
+            os.environ.pop("LANGCHAIN_PROJECT", None)
+            project = configure_langsmith_tracing()
+            assert project == "Prism"
+            assert os.environ["LANGSMITH_PROJECT"] == "Prism"
+            assert os.environ["LANGCHAIN_PROJECT"] == "Prism"
+            assert os.environ["LANGSMITH_TRACING"] == "true"
 
     def test_environment_validator_rejects_invalid_value(self):
         """ENVIRONMENT validator raises ValidationError for invalid values."""
