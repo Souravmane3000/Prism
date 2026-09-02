@@ -48,12 +48,12 @@ For every node:
 1. Return **partial state only** — never treat “return full state” as acceptable style.
 2. Persist outputs to Supabase **before** returning.
 3. Emit progress on **start** and **complete** via Supabase writes that Realtime broadcasts.
-4. Rely on LangSmith auto-tracing (project `prism`); append human-readable lines to `messages`.
+4. Rely on LangSmith auto-tracing (project `Prism`); append human-readable lines to `messages`.
 5. On failure, set `state["error"]` with a clear string; log with `logging`; **do not** raise uncaught exceptions that kill the graph without updating state.
 6. Never execute user repository code outside `Modal.Sandbox`.
 7. Never put `github_token` into Supabase rows or Realtime payloads.
 
-HITL nodes **must** use `langgraph.types.interrupt` and a Supabase-backed checkpointer. Resume via `graph.update_state` then continue streaming. In-memory checkpoints are forbidden for deployed HITL.
+HITL pauses use `interrupt_before=["hitl_1", "hitl_2"]` at compile time and a Supabase-backed checkpointer. Resume via `graph.update_state` then continue streaming. In-memory checkpoints are forbidden for deployed HITL.
 
 ---
 
@@ -112,7 +112,7 @@ HITL nodes **must** use `langgraph.types.interrupt` and a Supabase-backed checkp
 | Frontend component files | `kebab-case.tsx` |
 | CSS variables | `--color-*` kebab after prefix |
 | LangGraph node names / `current_agent` | exact strings from `GRAPH.md` |
-| LangSmith project | `prism` |
+| LangSmith project | `Prism` (case-sensitive; Modal secret `prism-secrets` is unrelated) |
 
 ---
 

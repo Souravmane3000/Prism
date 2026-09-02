@@ -107,3 +107,11 @@ class TestGetCompiledGraph:
         assert return_type is not object, (
             "get_compiled_graph return type must be CompiledStateGraph, not 'object'"
         )
+
+    def test_compile_pauses_before_hitl_nodes(self):
+        import inspect
+        from backend import graph as graph_module
+
+        source = inspect.getsource(graph_module.get_compiled_graph)
+        compact = source.replace(" ", "")
+        assert 'interrupt_before=["hitl_1","hitl_2"]' in compact

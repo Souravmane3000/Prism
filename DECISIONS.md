@@ -172,18 +172,18 @@ Log of key decisions. Treat as binding unless a later ADR explicitly supersedes 
 
 ---
 
-## ADR-011 — LangSmith Project `"prism"`
+## ADR-011 — LangSmith Project `"Prism"`
 
-**Decision:** Enable LangSmith auto-tracing for all LangGraph runs with project name `prism` via env at Modal startup.
+**Decision:** Enable LangSmith auto-tracing for all LangGraph runs with project name `Prism` (case-sensitive) via env at Modal startup. Lowercase `prism` is canonicalized to `Prism` so traces land in the LangSmith UI project operators actually open.
 
-**Context:** Need node-level observability for demos and debugging.
+**Context:** Need node-level observability for demos and debugging. LangSmith project names are case-sensitive; the live workspace is `Prism`. The Modal secret **name** `prism-secrets` is a vault identifier and must not be renamed to match LangSmith.
 
 **Reasons:**
 
 - Zero custom telemetry code per agent.
 - Standard for LangChain/LangGraph stacks.
 
-**Consequences:** Secrets include LangSmith API key in `prism-secrets`. Agents must not invent a parallel logging analytics system.
+**Consequences:** Secrets include LangSmith API key in `prism-secrets`. Agents must not invent a parallel logging analytics system. Serverless workers flush traces before exit (`wait_for_all_tracers`).
 
 ---
 

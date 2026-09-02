@@ -291,3 +291,24 @@ class TestClassifyTestResults:
         assert "LANGSMITH_UI_PROJECT" in config_src
         assert "flush_langsmith_traces" in config_src
         assert "LANGCHAIN_CALLBACKS_BACKGROUND" in config_src
+
+    def test_session_record_excludes_pat_and_ci_workflow_exists(self):
+        types_src = TS_TYPES.read_text(encoding="utf-8")
+        match = re.search(
+            r"export interface SessionRecord\s*\{(.*?)\n\}",
+            types_src,
+            re.DOTALL,
+        )
+        assert match, "SessionRecord missing from types.ts"
+        body = match.group(1)
+        assert "run_id" in body
+        assert "github_token" not in body
+        assert "pat" not in body.lower()
+        workflow = ROOT / ".github" / "workflows" / "pytest.yml"
+        assert workflow.is_file()
+        assert "pytest tests/" in workflow.read_text(encoding="utf-8")
+        assert (ROOT / "docs" / "MANUAL_TEST.md").is_file()
+        runform = (ROOT / "frontend" / "components" / "input" / "RunForm.tsx").read_text(
+            encoding="utf-8"
+        )
+        assert 'type="password"' in runform

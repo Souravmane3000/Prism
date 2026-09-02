@@ -7,11 +7,13 @@ Give Prism a GitHub repository and an issue. It reads the codebase, breaks the w
 Prism plans and evaluates first. It does not silently rewrite your application.
 
 [![Live Demo](https://img.shields.io/badge/Live_Demo-prism--beta--one.vercel.app-a3e635?labelColor=0a0d08)](https://prism-beta-one.vercel.app)
+[![pytest](https://github.com/Souravmane3000/Prism/actions/workflows/pytest.yml/badge.svg)](https://github.com/Souravmane3000/Prism/actions/workflows/pytest.yml)
 [![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white&labelColor=0a0d08)](https://www.python.org/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-StateGraph-1C3C3C?labelColor=0a0d08)](https://github.com/langchain-ai/langgraph)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Modal-009688?logo=fastapi&logoColor=white&labelColor=0a0d08)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Next.js-App_Router-000000?logo=nextdotjs&logoColor=white&labelColor=0a0d08)](https://nextjs.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20pgvector-3FCF8E?logo=supabase&logoColor=white&labelColor=0a0d08)](https://supabase.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-7C3AED?labelColor=0a0d08)](LICENSE)
 
 **[Live demo](https://prism-beta-one.vercel.app)** · **[How the graph works](GRAPH.md)** · **[Architecture](ARCHITECTURE.md)** · **[API](API.md)**
 
@@ -102,7 +104,7 @@ flowchart TB
 | **LangGraph** | Eight-node `StateGraph` with one conditional edge after tests. Single compiled graph per process. |
 | **Supabase** | System of record: runs, agent outputs, HITL payloads, embedding cache, and the LangGraph checkpointer. Realtime pushes agent start/complete events to the UI. |
 | **OpenAI** | `gpt-4o-mini` for chat agents. `text-embedding-3-small` for Code Navigator. One cached factory in `backend/llm.py` — agents never instantiate their own client. |
-| **LangSmith** | Auto-traces every graph run under project `prism`. |
+| **LangSmith** | Auto-traces every graph run under project `Prism`. |
 
 REST is for **control**. Realtime is for **live UI**. There is no WebSocket or SSE endpoint on FastAPI, by design — serverless workers should not hold streaming connections.
 
@@ -132,7 +134,7 @@ These are the engineering choices a reviewer can verify in the repo:
 | Tests in isolation | Modal Sandbox (`pytest` / `unittest` / Jest) |
 | Frontend | Next.js App Router, Tailwind for layout, CSS custom properties for color |
 | GitHub | PyGitHub, PAT per session (no user accounts in MVP) |
-| Tracing | LangSmith project `prism` |
+| Tracing | LangSmith project `Prism` |
 
 ---
 
@@ -149,6 +151,9 @@ Prism/
 ├── frontend/                Next.js workspace UI
 ├── supabase/migrations/     Schema: runs, agent_outputs, hitl_checkpoints, embeddings
 ├── tests/                   Agent, graph, API, and contract tests
+├── docs/MANUAL_TEST.md      Production click matrix before a demo
+├── .github/workflows/       pytest on push/PR to main
+├── LICENSE                  MIT
 ├── modal_app.py             Modal image, secrets, ASGI entrypoint
 ├── PRD.md                   Product requirements
 ├── ARCHITECTURE.md          System design
@@ -202,6 +207,10 @@ API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 pytest tests/ -q
 ```
 
+GitHub Actions runs that suite on every push and pull request to `main` (see [`.github/workflows/pytest.yml`](.github/workflows/pytest.yml)). Live integration tests under `backend/tests_integration/` stay local — they need real API keys.
+
+Interview re-run: [docs/MANUAL_TEST.md](docs/MANUAL_TEST.md).
+
 ### 2. Frontend
 
 Create `frontend/.env.local`:
@@ -251,6 +260,7 @@ Point `NEXT_PUBLIC_API_BASE_URL` at the Modal web URL and `FRONTEND_ORIGIN` at t
 | [GRAPH.md](GRAPH.md) | Exact nodes, edges, state schema, HITL resume protocol |
 | [API.md](API.md) | Request/response contracts |
 | [DECISIONS.md](DECISIONS.md) | Why LangGraph, Modal, Realtime, per-session PAT, … |
+| [docs/MANUAL_TEST.md](docs/MANUAL_TEST.md) | Production click-path matrix before a demo |
 
 ---
 

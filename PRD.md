@@ -51,7 +51,7 @@ MVP is the complete Option B path. There is no stripped-down “planning only”
 9. **Debugger** (conditional) — Symptom → root cause → minimal fix proposals with confidence; no full rewrites.
 10. **PR Summarizer** — Professional PR title/body from full pipeline output; optional real PR creation via GitHub API.
 11. **Frontend** — Dark premium 3-panel UI; live agent stream via Supabase Realtime; cyan HITL cards.
-12. **Observability** — LangSmith project `"prism"` auto-traces LangGraph runs when env is set.
+12. **Observability** — LangSmith project `Prism` (case-sensitive) auto-traces LangGraph runs when env is set. The Modal secret name `prism-secrets` is the vault, not the LangSmith project.
 
 ### Explicitly out of scope for MVP
 
@@ -105,7 +105,7 @@ A run is considered successful for MVP when **all** of the following hold:
 | Cost | Serverless Modal (idle ≈ $0); $30 demo budget assumed sufficient for demo traffic |
 | Secrets | All keys from env; production Modal Secret named `prism-secrets` |
 | Theming | All colors only in `styles/tokens.css` as CSS custom properties |
-| Tracing | LangSmith project name `prism` |
+| Tracing | LangSmith project `Prism` (case-sensitive; Modal secret `prism-secrets` is unrelated) |
 
 ---
 
@@ -123,11 +123,19 @@ Do not start Phase 1 until Phase 0 docs are complete and treated as source of tr
 
 ## 9. Acceptance Checklist (MVP Demo)
 
-- [ ] Start run with real repo + issue + PAT
-- [ ] Planner output visible; HITL 1 approve/edit works
-- [ ] File map and implementation plan visible; HITL 2 approve works
-- [ ] Sandbox tests run; conditional Debugger skip/run is correct
-- [ ] PR draft quality is recruiter-ready
-- [ ] Optional create-PR succeeds on GitHub
-- [ ] Wall time under 5 minutes excluding HITL wait
-- [ ] PAT absent from DB rows and application logs
+Proven on production ([live demo](https://prism-beta-one.vercel.app)). Remaining clicks are in [docs/MANUAL_TEST.md](docs/MANUAL_TEST.md).
+
+- [x] Start run with real repo + issue + PAT
+- [x] Planner output visible; HITL 1 **approve** works
+- [ ] HITL 1 **edit then approve** — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 2
+- [x] File map and implementation plan visible; HITL 2 approve works
+- [x] Sandbox tests run; Debugger **skip** when there are no failures to debug
+- [ ] Debugger **runs** on a failing pytest suite — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 3
+- [x] PR draft is recruiter-ready in the inspector
+- [x] Create-PR 404 on a repo the PAT cannot write is graceful
+- [ ] Create-PR **succeeds** on a repo you own — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 4
+- [ ] HITL Stop — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 1
+- [ ] Paste issue (not URL) — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 5
+- [ ] Reload / Recent Run hydrate — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 6
+- [ ] Wall time under 5 minutes excluding HITL wait — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 7
+- [x] PAT absent from `PrismState`; DB hint is last four characters; logs use `***` redaction (code + unit tests). Spot-check Modal logs — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 8

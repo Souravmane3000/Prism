@@ -81,6 +81,10 @@ Thumbs.db
 # ── Jupyter ───────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
 
+# ── Cursor / agent scratch ────────────────────────────────────────────────────
+frontend/AGENTS.md
+frontend/CLAUDE.md
+
 # UI/UX SKILLS
 .cursor/skills
 .cursorrules 

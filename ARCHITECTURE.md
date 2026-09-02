@@ -37,7 +37,7 @@
 │       → Test Runner → (Debugger?) → PR Summarizer → END                   │
 │                                                                           │
 │  LLM: OpenAI gpt-4o-mini (OPENAI_API_KEY) + text-embedding-3-small        │
-│  Traces: LangSmith project "prism"                                        │
+│  Traces: LangSmith project "Prism"                                        │
 └───────┬──────────────────┬───────────────────┬───────────────────────────┘
         │                  │                   │
         ▼                  ▼                   ▼
@@ -88,7 +88,7 @@ Official OpenAI API. Chat uses `gpt-4o-mini` (`OPENAI_API_KEY`, `OPENAI_MODEL_NA
 
 ### LangSmith
 
-Observability. With LangSmith env vars set at Modal startup and project name `"prism"`, LangGraph node runs are auto-traced. Agents do not implement custom LangSmith clients beyond standard LangChain/LangGraph instrumentation.
+Observability. With LangSmith env vars set at Modal startup and project name `"Prism"`, LangGraph node runs are auto-traced. Agents do not implement custom LangSmith clients beyond standard LangChain/LangGraph instrumentation. The Modal secret named `prism-secrets` is the production vault; it is not the LangSmith project.
 
 ---
 
@@ -118,7 +118,7 @@ Observability. With LangSmith env vars set at Modal startup and project name `"p
 | Inference | **OpenAI** | gpt-4o-mini chat + text-embedding-3-small; auth via `OPENAI_API_KEY` |
 | Test isolation | **Modal.Sandbox** | Clone + test execution only |
 | Data + Realtime | **Supabase** | Postgres tables, pgvector embeddings, checkpointer storage, Realtime channels |
-| Tracing | **LangSmith** (SaaS) | Traces for project `"prism"`; env configured on Modal at startup |
+| Tracing | **LangSmith** (SaaS) | Traces for project `"Prism"`; env configured on Modal at startup |
 | Secrets (prod) | **Modal Secret `prism-secrets`** | `OPENAI_API_KEY`, Supabase keys, LangSmith keys, CORS origin, etc. |
 
 Idle Modal cost is ~$0. Frontend is static/SSR on Vercel. Database and Realtime are always Supabase-managed.
@@ -129,7 +129,7 @@ Idle Modal cost is ~$0. Frontend is static/SSR on Vercel. Database and Realtime 
 
 LangSmith sits **outside** the request path as an observability sink:
 
-1. Modal web app startup / container env includes LangSmith variables (`LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT=prism`, and any required endpoint vars).
+1. Modal web app startup / container env includes LangSmith variables (`LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT=Prism`, plus legacy `LANGCHAIN_*` aliases).
 2. Once set, LangChain/LangGraph auto-instruments node invocations and LLM calls.
 3. No agent node should manually push traces or invent a second tracing system.
 4. Failures in tracing must not break the pipeline; missing LangSmith config degrades to “no traces,” not hard failure (document in ops notes; prefer always-on for demos).

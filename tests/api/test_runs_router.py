@@ -240,6 +240,15 @@ class TestApproveRun:
         assert "ghp_supersecrettoken" not in response.text
 
 
+class TestRedactToken:
+    def test_redact_token_keeps_only_last_four(self):
+        from backend.routers.runs import _redact_token
+
+        assert _redact_token("ghp_supersecrettoken") == "***oken"
+        assert _redact_token("abcd") == "***abcd"
+        assert _redact_token("ab") == "***"
+
+
 class TestCreatePR:
     def test_create_pr_when_not_completed_returns_409(self, test_client):
         """POST /api/runs/{id}/create-pr when run is not completed returns 409."""
