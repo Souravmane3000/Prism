@@ -279,9 +279,15 @@ class TestClassifyTestResults:
         assert graph_src.find("backend.config") < graph_src.find("from langgraph")
         modal_src = (ROOT / "modal_app.py").read_text(encoding="utf-8")
         assert "configure_langsmith_tracing" in modal_src
+        assert "flush_langsmith_traces" in modal_src
         runs_src = (ROOT / "backend" / "routers" / "runs.py").read_text(encoding="utf-8")
         assert "def _graph_run_config" in runs_src
         assert '"run_name"' in runs_src
+        assert "tracing_context" in runs_src
+        assert "flush_langsmith_traces" in runs_src
         config_src = (ROOT / "backend" / "config.py").read_text(encoding="utf-8")
         assert "LANGSMITH_TRACING" in config_src
         assert "get_env_var.cache_clear" in config_src
+        assert "LANGSMITH_UI_PROJECT" in config_src
+        assert "flush_langsmith_traces" in config_src
+        assert "LANGCHAIN_CALLBACKS_BACKGROUND" in config_src

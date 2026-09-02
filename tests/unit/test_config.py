@@ -55,6 +55,19 @@ class TestSettings:
             assert os.environ["LANGSMITH_PROJECT"] == "Prism"
             assert os.environ["LANGCHAIN_PROJECT"] == "Prism"
             assert os.environ["LANGSMITH_TRACING"] == "true"
+            assert os.environ["LANGCHAIN_CALLBACKS_BACKGROUND"] == "false"
+
+    def test_lowercase_prism_maps_to_langsmith_ui_project(self):
+        from backend.config import configure_langsmith_tracing
+
+        with patch.dict(
+            os.environ,
+            {"LANGCHAIN_PROJECT": "prism", "LANGSMITH_PROJECT": "prism"},
+            clear=False,
+        ):
+            project = configure_langsmith_tracing()
+            assert project == "Prism"
+            assert os.environ["LANGSMITH_PROJECT"] == "Prism"
 
     def test_environment_validator_rejects_invalid_value(self):
         """ENVIRONMENT validator raises ValidationError for invalid values."""

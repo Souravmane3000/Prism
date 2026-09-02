@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from github.GithubException import GithubException
 
 import backend.config  # noqa: F401 — LangSmith env before LangGraph
+from backend.config import configure_langsmith_tracing, flush_langsmith_traces
 from backend.github_client import (
     commit_file,
     create_branch,
@@ -99,27 +100,36 @@ async def _astream_with_retry(
     iteration waiting for a node that will never run. After each yielded chunk
     we read aget_state and return as soon as the next node is a HITL gate.
     """
+    from langsmith.run_helpers import tracing_context
+
+    project = configure_langsmith_tracing()
     pending: Any = input_state
     for attempt in range(1, _GRAPH_TRANSIENT_ATTEMPTS + 1):
         try:
-            async for _chunk in graph.astream(pending, config, stream_mode="values"):
-                try:
-                    snapshot = await graph.aget_state(config)
-                except Exception:
-                    logger.warning(
-                        "[runs] aget_state during astream failed — run_id=%s",
-                        run_id,
-                        exc_info=True,
-                    )
-                    continue
-                paused = _paused_hitl_node(snapshot)
-                if paused:
-                    logger.info(
-                        "[runs] astream reached HITL boundary — run_id=%s next=%s",
-                        run_id,
-                        paused,
-                    )
-                    return
+            with tracing_context(
+                enabled=True,
+                project_name=project,
+                tags=["prism", f"run:{run_id[:8]}"],
+                metadata={"prism_run_id": run_id},
+            ):
+                async for _chunk in graph.astream(pending, config, stream_mode="values"):
+                    try:
+                        snapshot = await graph.aget_state(config)
+                    except Exception:
+                        logger.warning(
+                            "[runs] aget_state during astream failed — run_id=%s",
+                            run_id,
+                            exc_info=True,
+                        )
+                        continue
+                    paused = _paused_hitl_node(snapshot)
+                    if paused:
+                        logger.info(
+                            "[runs] astream reached HITL boundary — run_id=%s next=%s",
+                            run_id,
+                            paused,
+                        )
+                        return
             return
         except Exception as exc:
             try:
@@ -617,10 +627,14 @@ async def execute_pipeline_job(
     initial_state: Optional[dict[str, Any]] = None,
 ) -> None:
     """Entry point for the Modal run_pipeline worker."""
-    if initial_state is None:
-        await _resume_graph_background(run_id, github_token)
-        return
-    await _run_graph_background(run_id, initial_state, github_token)
+    configure_langsmith_tracing()
+    try:
+        if initial_state is None:
+            await _resume_graph_background(run_id, github_token)
+            return
+        await _run_graph_background(run_id, initial_state, github_token)
+    finally:
+        flush_langsmith_traces()
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────

@@ -52,11 +52,17 @@ async def run_pipeline(
     HTTP response is not held open until the Planner (or later agents) finish.
     """
     import backend.config  # noqa: F401, PLC0415 — tracing env before LangGraph
-    from backend.config import configure_langsmith_tracing  # noqa: PLC0415
+    from backend.config import (  # noqa: PLC0415
+        configure_langsmith_tracing,
+        flush_langsmith_traces,
+    )
     from backend.routers.runs import execute_pipeline_job  # noqa: PLC0415
 
     configure_langsmith_tracing()
-    await execute_pipeline_job(run_id, github_token, initial_state)
+    try:
+        await execute_pipeline_job(run_id, github_token, initial_state)
+    finally:
+        flush_langsmith_traces()
 
 
 # ── Web endpoint ──────────────────────────────────────────────────────────────

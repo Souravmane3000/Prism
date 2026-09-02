@@ -138,9 +138,21 @@ def origin_allowed_by_cors(origin: str, allowed_origins: list[str]) -> bool:
 
 settings = Settings()  # type: ignore[call-arg]
 
+# LangSmith project names are case-sensitive. The live workspace is "Prism".
+# Modal secret *name* "prism-secrets" is unrelated and must not be renamed.
+LANGSMITH_UI_PROJECT = "Prism"
+
 
 def _strip_env_quotes(value: str) -> str:
     return value.strip().strip('"').strip("'")
+
+
+def _canonical_langsmith_project(raw: str) -> str:
+    """Map prism/Prism/"Prism" onto the LangSmith UI project name."""
+    name = _strip_env_quotes(raw)
+    if not name or name.lower() == "prism":
+        return LANGSMITH_UI_PROJECT
+    return name
 
 
 def configure_langsmith_tracing() -> str:
@@ -150,15 +162,15 @@ def configure_langsmith_tracing() -> str:
     Sets both LANGSMITH_* (current SDK) and LANGCHAIN_* (legacy) names.
     Clears langsmith's lru_cached env lookups so a late call still wins
     if LangGraph was imported before this module.
+
+    Prefer LANGSMITH_PROJECT (the LangSmith UI name) over LANGCHAIN_PROJECT.
     """
-    project = _strip_env_quotes(
-        os.environ.get("LANGCHAIN_PROJECT")
-        or os.environ.get("LANGSMITH_PROJECT")
+    project = _canonical_langsmith_project(
+        os.environ.get("LANGSMITH_PROJECT")
+        or os.environ.get("LANGCHAIN_PROJECT")
         or settings.langchain_project
-        or "prism"
+        or LANGSMITH_UI_PROJECT
     )
-    if not project:
-        project = "prism"
 
     endpoint = _strip_env_quotes(
         os.environ.get("LANGSMITH_ENDPOINT")
@@ -168,6 +180,8 @@ def configure_langsmith_tracing() -> str:
 
     os.environ["LANGCHAIN_TRACING_V2"] = "true"
     os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGCHAIN_CALLBACKS_BACKGROUND"] = "false"
+    os.environ["LANGSMITH_TRACING_BACKGROUND"] = "false"
     os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
     os.environ["LANGSMITH_API_KEY"] = settings.langsmith_api_key
     os.environ["LANGCHAIN_PROJECT"] = project
@@ -184,6 +198,16 @@ def configure_langsmith_tracing() -> str:
         logger.debug("Could not clear langsmith env cache", exc_info=True)
 
     return project
+
+
+def flush_langsmith_traces() -> None:
+    """Block until queued traces are posted. Required on Modal before the worker exits."""
+    try:
+        from langchain_core.tracers.langchain import wait_for_all_tracers
+
+        wait_for_all_tracers()
+    except Exception:
+        logger.debug("wait_for_all_tracers failed", exc_info=True)
 
 
 # ── LangSmith auto-tracing setup ─────────────────────────────────────────────
@@ -211,7 +235,8 @@ for _noisy_logger in (
     logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
 
 logger.info(
-    "Prism config loaded — environment=%s langsmith_project=%s tracing=on",
+    "Prism config loaded — environment=%s langsmith_project=%s tracing=on "
+    "(Modal secret name prism-secrets is not the LangSmith project)",
     settings.environment,
     _langsmith_project,
 )
