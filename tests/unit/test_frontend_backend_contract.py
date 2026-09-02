@@ -249,3 +249,26 @@ class TestClassifyTestResults:
             encoding="utf-8"
         )
         assert "laterPipelineAgentCompleted" in vis
+
+    def test_skipped_debugger_and_pr_error_are_handled_in_ui(self):
+        vis = (ROOT / "frontend" / "lib" / "hitlVisibility.ts").read_text(
+            encoding="utf-8"
+        )
+        assert "export function isDebuggerSkippedInStream" in vis
+        assert "export function optimisticNextAgent" in vis
+        stream = (ROOT / "frontend" / "components" / "stream" / "ActivityStream.tsx").read_text(
+            encoding="utf-8"
+        )
+        assert "isDebuggerSkippedInStream" in stream
+        assert "optimisticNextAgent" in stream
+        pr_tab = (ROOT / "frontend" / "components" / "output" / "PRDraftTab.tsx").read_text(
+            encoding="utf-8"
+        )
+        assert 'base_branch: "main"' not in pr_tab
+        assert "overflowWrap" in pr_tab
+        assert "formatCreatePRError" in pr_tab
+        hitl = (ROOT / "frontend" / "components" / "stream" / "HITLCard.tsx").read_text(
+            encoding="utf-8"
+        )
+        assert "Checkpoint 1 of 2" in hitl
+        assert "Checkpoint 2 of 2" in hitl

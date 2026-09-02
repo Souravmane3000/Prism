@@ -225,3 +225,29 @@ class TestCommitFile:
         sha = commit_file(repo_mock, "main", "REPORT.md", "# Updated", "chore: update report")
         repo_mock.update_file.assert_called_once()
         assert sha == "updatedsha"
+
+
+class TestFormatGithubWriteError:
+    def test_404_does_not_echo_api_json(self):
+        from backend.github_client import format_github_write_error
+
+        exc = GithubException(
+            404,
+            {
+                "message": "Not Found",
+                "documentation_url": "https://docs.github.com/rest/git/refs#create-a-reference",
+                "status": "404",
+            },
+            None,
+        )
+        message = format_github_write_error(exc)
+        assert "documentation_url" not in message
+        assert "create-a-reference" not in message
+        assert "{" not in message
+        assert "cannot write" in message.lower()
+
+    def test_401_mentions_pat(self):
+        from backend.github_client import format_github_write_error
+
+        message = format_github_write_error(GithubException(401, {"message": "Bad credentials"}, None))
+        assert "PAT" in message or "token" in message.lower()

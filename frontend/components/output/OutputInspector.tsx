@@ -81,7 +81,10 @@ export default function OutputInspector({
       {/* Tab content */}
       <div className="flex-1 overflow-y-auto">
         <TabPanel id="plan" activeTab={activeTab}>
-          <PlanTab subtasks={runOutput?.subtasks ?? []} />
+          <PlanTab
+            subtasks={runOutput?.subtasks ?? []}
+            implementationPlan={runOutput?.implementation_plan ?? []}
+          />
         </TabPanel>
 
         <TabPanel id="files" activeTab={activeTab}>

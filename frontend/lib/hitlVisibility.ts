@@ -150,3 +150,51 @@ export function shouldRenderHitlCard(
     !!agentMap.get("impl_planner")?.completeRow && !agentMap.get("test_runner")
   );
 }
+
+export function isDebuggerSkippedInStream(
+  agentMap: AgentMap,
+  runStatus: RunRow | null,
+): boolean {
+  if (agentMap.get("debugger")) return false;
+  if (runStatus?.all_tests_passed === true) return true;
+  if (
+    !!agentMap.get("pr_summarizer") &&
+    runStatus?.all_tests_passed !== false
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function optimisticNextAgent(
+  resolvedCheckpoints: ReadonlySet<string>,
+  agentMap: AgentMap,
+  checkpointPayload: CheckpointRow | null,
+  runStatus: RunRow | null,
+): AgentName | null {
+  if (
+    isHitlResolved(
+      "hitl_1",
+      resolvedCheckpoints,
+      agentMap,
+      checkpointPayload,
+      runStatus,
+    ) &&
+    !agentMap.get("code_navigator")
+  ) {
+    return "code_navigator";
+  }
+  if (
+    isHitlResolved(
+      "hitl_2",
+      resolvedCheckpoints,
+      agentMap,
+      checkpointPayload,
+      runStatus,
+    ) &&
+    !agentMap.get("test_runner")
+  ) {
+    return "test_runner";
+  }
+  return null;
+}

@@ -16,8 +16,10 @@ import HITLCard from "@/components/stream/HITLCard";
 import {
   PIPELINE_ORDER,
   firstLaterCompleteAt,
+  isDebuggerSkippedInStream,
   isHitlResolved,
   laterPipelineAgentCompleted,
+  optimisticNextAgent,
   shouldRenderHitlCard,
 } from "@/lib/hitlVisibility";
 import type {
@@ -192,11 +194,27 @@ export default function ActivityStream({
     seenAgents.add("hitl_2");
   }
 
+  const debuggerSkipped = isDebuggerSkippedInStream(agentMap, runStatus);
+  if (debuggerSkipped) {
+    seenAgents.add("debugger");
+  }
+
+  const nextAfterHitl = optimisticNextAgent(
+    resolvedCheckpoints,
+    agentMap,
+    checkpointPayload,
+    runStatus,
+  );
+  if (nextAfterHitl) {
+    seenAgents.add(nextAfterHitl);
+  }
+
   const visibleAgents = PIPELINE_ORDER.filter(
     (a) => seenAgents.has(a) || a === runStatus?.current_agent,
   );
   const completedPipelineAgents = PIPELINE_AGENTS.filter(
-    (a) => !!agentMap.get(a)?.completeRow,
+    (a) =>
+      !!agentMap.get(a)?.completeRow || (a === "debugger" && debuggerSkipped),
   ).length;
 
   return (
@@ -241,11 +259,8 @@ export default function ActivityStream({
             runStatus?.current_agent === agent && !!runStatus?.error;
 
           const completePayload = entry?.completeRow?.payload ?? {};
-          const isDebuggerSkipped =
-            agent === "debugger" &&
-            !agentMap.get("debugger") &&
-            (seenAgents.has("pr_summarizer") ||
-              !!agentMap.get("pr_summarizer")?.completeRow);
+          const isDebuggerSkipped = agent === "debugger" && debuggerSkipped;
+          const isOptimisticRunning = agent === nextAfterHitl;
 
           if (
             shouldRenderHitlCard(
@@ -293,7 +308,7 @@ export default function ActivityStream({
               phase={
                 isComplete
                   ? "complete"
-                  : entry?.startRow
+                  : entry?.startRow || isOptimisticRunning
                     ? "start"
                     : null
               }
@@ -302,7 +317,7 @@ export default function ActivityStream({
                 entry?.completeRow?.created_at ??
                 (isComplete ? firstLaterCompleteAt(agent, agentMap) : null)
               }
-              isRunning={isRunning && !hitlResolved}
+              isRunning={(isRunning || isOptimisticRunning) && !hitlResolved}
               isSkipped={isDebuggerSkipped}
               isError={isError}
               payload={completePayload}

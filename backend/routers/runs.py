@@ -25,10 +25,13 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from github.GithubException import GithubException
+
 from backend.github_client import (
     commit_file,
     create_branch,
     create_pull_request,
+    format_github_write_error,
     get_github_client,
     get_repo,
 )
@@ -959,8 +962,27 @@ async def create_pr(run_id: str, body: CreatePRRequest) -> CreatePRResponse:
         github_client = get_github_client(body.github_token)
         repo = get_repo(github_client, run["repo_url"])
 
-        base_branch = body.base_branch or repo.default_branch
-        create_branch(repo, branch_name, base=base_branch)
+        requested_base = body.base_branch
+        base_branch = requested_base or repo.default_branch
+        try:
+            create_branch(repo, branch_name, base=base_branch)
+        except GithubException as exc:
+            default_branch = repo.default_branch
+            if (
+                requested_base
+                and exc.status == 404
+                and requested_base != default_branch
+            ):
+                logger.warning(
+                    "[runs] base branch %s not found for run %s; retrying with %s",
+                    requested_base,
+                    run_id,
+                    default_branch,
+                )
+                base_branch = default_branch
+                create_branch(repo, branch_name, base=base_branch)
+            else:
+                raise
 
         commit_msg = body.commit_message or f"chore: add Prism analysis report for run {run_id[:8]}"
         commit_file(repo, branch_name, "PRISM_REPORT.md", report_md, commit_msg)
@@ -972,11 +994,20 @@ async def create_pr(run_id: str, body: CreatePRRequest) -> CreatePRResponse:
             head=branch_name,
             base=base_branch,
         )
+    except GithubException as exc:
+        logger.error("[runs] GitHub error creating PR for run %s: %s", run_id, exc, exc_info=True)
+        raise _error_response(
+            "github_error",
+            format_github_write_error(exc),
+            status.HTTP_502_BAD_GATEWAY,
+            run_id,
+            details={"github_status": exc.status},
+        )
     except Exception as exc:
         logger.error("[runs] GitHub error creating PR for run %s: %s", run_id, exc, exc_info=True)
         raise _error_response(
             "github_error",
-            f"GitHub API error: {str(exc)[:200]}",
+            "GitHub could not create the pull request. Try again, or open the PR manually from the draft.",
             status.HTTP_502_BAD_GATEWAY,
             run_id,
         )

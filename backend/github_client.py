@@ -246,3 +246,34 @@ def create_pull_request(
     except GithubException as exc:
         logger.error("GitHub error creating PR: %s", exc)
         raise exc
+
+
+def format_github_write_error(exc: GithubException) -> str:
+    """
+    Short operator-facing message for branch/PR write failures.
+
+    GitHub returns 404 (not 403) when a PAT cannot create refs on a repo the
+    caller does not own. Never echo the raw API JSON — it overflows the UI
+    and is not actionable.
+    """
+    status = exc.status
+    if status in (404, 403):
+        return (
+            "GitHub could not create the branch or pull request. "
+            "The current PAT cannot write to this repository — Prism cannot open a PR "
+            "on a repo you do not have push access to. Use a repository you own or a "
+            "fork, with a token that has the repo scope. The PR draft is still available here."
+        )
+    if status == 401:
+        return (
+            "GitHub rejected the PAT. Check that the token is valid and has the repo scope."
+        )
+    if status == 422:
+        return (
+            "GitHub rejected the branch or pull request "
+            "(the ref may already exist, or the base branch is invalid)."
+        )
+    return (
+        "GitHub could not create the pull request. "
+        "Try again, or open the PR manually from the draft in this panel."
+    )

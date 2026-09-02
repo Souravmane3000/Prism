@@ -155,7 +155,7 @@ export default function AgentCard({
           {/* Description / phase label */}
           <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
             {isSkipped
-              ? "Skipped — no failures to debug"
+              ? "Skipped — no test failures to debug"
               : isError
                 ? String(payload.error ?? "An error occurred")
                 : isComplete && summary

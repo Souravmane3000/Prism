@@ -25,8 +25,26 @@ import {
   AlertCircle,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
-import { createPR } from "@/lib/api";
+import { ApiError, createPR } from "@/lib/api";
 import type { PRDraft, RunStatus } from "@/lib/types";
+
+function formatCreatePRError(err: unknown): string {
+  if (err instanceof ApiError) {
+    const raw = err.message;
+    const looksLikeRawGitHub =
+      /documentation_url|create-a-reference/.test(raw) ||
+      (/\b404\b/.test(raw) && raw.includes("{"));
+    if (looksLikeRawGitHub) {
+      return (
+        "GitHub could not create the branch. The current PAT cannot write to this " +
+        "repository (not a repo you own, or missing repo scope). The PR draft stays " +
+        "here — Prism cannot open a pull request without push access."
+      );
+    }
+    return raw;
+  }
+  return err instanceof Error ? err.message : "Failed to create PR";
+}
 
 interface PRDraftTabProps {
   prDraft: PRDraft | null;
@@ -113,11 +131,10 @@ export default function PRDraftTab({
     try {
       const res = await createPR(runId, {
         github_token: pat,
-        base_branch: "main",
       });
       setCreatedUrl(res.pr_url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create PR");
+      setError(formatCreatePRError(err));
     } finally {
       setCreating(false);
     }
@@ -137,7 +154,7 @@ export default function PRDraftTab({
   }
 
   return (
-    <div className="p-4 flex flex-col gap-3 overflow-y-auto">
+    <div className="p-4 flex flex-col gap-3 overflow-y-auto overflow-x-hidden min-w-0">
       {/* PR Title */}
       <div>
         <h3
@@ -264,15 +281,20 @@ export default function PRDraftTab({
       {/* PR creation */}
       {error && (
         <div
-          className="flex items-center gap-2 p-2.5 rounded-lg text-xs"
+          className="flex items-start gap-2 p-2.5 rounded-lg text-xs w-full min-w-0 overflow-hidden"
           style={{
             backgroundColor: "rgba(248, 113, 113, 0.08)",
             border: "1px solid rgba(248, 113, 113, 0.25)",
             color: "var(--status-error)",
           }}
         >
-          <AlertCircle size={12} />
-          {error}
+          <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />
+          <p
+            className="min-w-0 flex-1 whitespace-pre-wrap break-all"
+            style={{ overflowWrap: "anywhere" }}
+          >
+            {error}
+          </p>
         </div>
       )}
 
@@ -304,6 +326,14 @@ export default function PRDraftTab({
           <GitPullRequestCreate size={13} />
           {creating ? "Creating PR..." : "Create GitHub PR"}
         </Button>
+      )}
+
+      {runStatus === "completed" && !createdUrl && (
+        <p className="text-xs text-center" style={{ color: "var(--text-dim)" }}>
+          Creating a GitHub PR needs push access on this repository. A PAT without
+          write permission cannot open a PR on someone else&apos;s repo; the draft
+          stays here.
+        </p>
       )}
 
       {runStatus !== "completed" && !createdUrl && (

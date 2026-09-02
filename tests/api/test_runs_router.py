@@ -258,6 +258,57 @@ class TestCreatePR:
             )
         assert response.status_code == 409
 
+    def test_create_pr_github_404_returns_writable_message(self, test_client):
+        """POST /create-pr maps GitHub 404 into a short write-access message, not raw JSON."""
+        from github.GithubException import GithubException
+
+        run_data = {
+            "id": "run-001",
+            "status": "completed",
+            "repo_url": "https://github.com/projectdiscovery/httpx",
+            "current_agent": "pr_summarizer",
+        }
+        pr_draft = {
+            "title": "Add flag",
+            "body": "body",
+            "review_checklist": [],
+        }
+        repo = MagicMock()
+        repo.default_branch = "main"
+        with (
+            patch("backend.routers.runs.get_run", new=AsyncMock(return_value=run_data)),
+            patch("backend.routers.runs.get_run_outputs", new=AsyncMock(return_value=[])),
+            patch(
+                "backend.routers.runs._materialize_run_state",
+                new=AsyncMock(return_value={"pr_draft": pr_draft}),
+            ),
+            patch("backend.routers.runs.get_github_client", return_value=MagicMock()),
+            patch("backend.routers.runs.get_repo", return_value=repo),
+            patch(
+                "backend.routers.runs.create_branch",
+                side_effect=GithubException(
+                    404,
+                    {
+                        "message": "Not Found",
+                        "documentation_url": "https://docs.github.com/rest/git/refs#create-a-reference",
+                        "status": "404",
+                    },
+                    None,
+                ),
+            ),
+        ):
+            response = test_client.post(
+                "/api/runs/run-001/create-pr",
+                json={"github_token": "ghp_faketoken1234567890"},
+            )
+        assert response.status_code == 502
+        detail = response.json()["detail"]
+        error = detail["error"] if isinstance(detail, dict) and "error" in detail else detail
+        message = error["message"]
+        assert "documentation_url" not in message
+        assert "create-a-reference" not in message
+        assert "cannot write" in message.lower()
+
     def test_error_responses_match_error_response_envelope(self, test_client):
         """Error responses include the ErrorResponse envelope shape."""
         with patch("backend.routers.runs.get_run", new=AsyncMock(return_value=None)):

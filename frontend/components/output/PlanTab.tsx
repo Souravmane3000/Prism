@@ -9,10 +9,11 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight, FileCode, ArrowRight } from "lucide-react";
-import type { Subtask } from "@/lib/types";
+import type { ImplementationPlanItem, Subtask } from "@/lib/types";
 
 interface PlanTabProps {
   subtasks: Subtask[];
+  implementationPlan?: ImplementationPlanItem[];
 }
 
 const COMPLEXITY_STYLES: Record<
@@ -36,8 +37,12 @@ const COMPLEXITY_STYLES: Record<
   },
 };
 
-export default function PlanTab({ subtasks }: PlanTabProps) {
+export default function PlanTab({
+  subtasks,
+  implementationPlan = [],
+}: PlanTabProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set([0]));
+  const [expandedPlan, setExpandedPlan] = useState<Set<number>>(new Set([0]));
 
   function toggle(i: number) {
     setExpanded((prev) => {
@@ -47,7 +52,7 @@ export default function PlanTab({ subtasks }: PlanTabProps) {
     });
   }
 
-  if (subtasks.length === 0) {
+  if (subtasks.length === 0 && implementationPlan.length === 0) {
     return (
       <div
         className="flex items-center justify-center h-full p-6"
@@ -197,6 +202,97 @@ export default function PlanTab({ subtasks }: PlanTabProps) {
           </div>
         );
       })}
+
+      {implementationPlan.length > 0 && (
+        <>
+          <p
+            className="text-xs mt-4 mb-2"
+            style={{ color: "var(--text-dim)" }}
+          >
+            Implementation plan — {implementationPlan.length} subtask
+            {implementationPlan.length !== 1 ? "s" : ""} (Checkpoint 2)
+          </p>
+          {implementationPlan.map((item, i) => {
+            const isOpen = expandedPlan.has(i);
+            const steps = item.steps ?? [];
+            return (
+              <div
+                key={item.subtask_id || i}
+                className="rounded-xl overflow-hidden"
+                style={{
+                  border: "1px solid var(--border-subtle)",
+                  backgroundColor: "var(--bg-card)",
+                }}
+              >
+                <button
+                  onClick={() =>
+                    setExpandedPlan((prev) => {
+                      const next = new Set(prev);
+                      next.has(i) ? next.delete(i) : next.add(i);
+                      return next;
+                    })
+                  }
+                  className="w-full flex items-center gap-2.5 px-4 py-3 text-left"
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ color: "var(--text-dim)", flexShrink: 0 }}>
+                    {isOpen ? (
+                      <ChevronDown size={13} />
+                    ) : (
+                      <ChevronRight size={13} />
+                    )}
+                  </span>
+                  <span
+                    className="text-sm font-medium flex-1 truncate"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    {item.subtask_id}
+                  </span>
+                  <span
+                    className="text-xs flex-shrink-0"
+                    style={{ color: "var(--text-dim)" }}
+                  >
+                    {steps.length} step{steps.length !== 1 ? "s" : ""}
+                  </span>
+                </button>
+                {isOpen && (
+                  <div
+                    className="px-4 pb-3 flex flex-col gap-2"
+                    style={{ borderTop: "1px solid var(--border-dim)" }}
+                  >
+                    {steps.map((step, si) => (
+                      <div
+                        key={`${item.subtask_id}-${si}`}
+                        className="pt-2 flex flex-col gap-0.5"
+                      >
+                        <span
+                          className="text-xs font-mono truncate"
+                          style={{ color: "var(--accent-lime)" }}
+                        >
+                          {step.file}
+                        </span>
+                        <p
+                          className="text-xs"
+                          style={{
+                            color: "var(--text-secondary)",
+                            lineHeight: 1.6,
+                          }}
+                        >
+                          {step.change_description}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }

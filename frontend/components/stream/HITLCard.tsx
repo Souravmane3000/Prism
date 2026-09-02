@@ -444,14 +444,16 @@ export default function HITLCard({
           className="text-sm font-semibold"
           style={{ color: "var(--accent-lime)" }}
         >
-          {isHitl1 ? "Checkpoint 1 — Subtask Review" : "Checkpoint 2 — Plan Review"}
+          {isHitl1
+            ? "Checkpoint 1 of 2 — Subtask Review"
+            : "Checkpoint 2 of 2 — Implementation Plan"}
         </span>
       </div>
 
       <p className="text-xs mb-4" style={{ color: "var(--text-secondary)" }}>
         {isHitl1
-          ? "Review and edit the subtask breakdown. Approve to begin file mapping."
-          : "Review and edit the implementation plan. Approve to run tests in the sandbox."}
+          ? "First review gate: edit the subtask list, then approve to start file mapping. A second review happens after the implementation plan."
+          : "Second review gate: this is the file-level plan, not the subtask list. Approve to run the target repository's tests."}
       </p>
 
       {isHitl1 && editedSubtasks.length === 0 && (
@@ -475,15 +477,20 @@ export default function HITLCard({
       {/* Error */}
       {error && (
         <div
-          className="flex items-center gap-2 mb-3 p-2 rounded-lg text-xs"
+          className="flex items-start gap-2 mb-3 p-2 rounded-lg text-xs w-full min-w-0 overflow-hidden"
           style={{
             backgroundColor: "rgba(248, 113, 113, 0.08)",
             border: "1px solid rgba(248, 113, 113, 0.25)",
             color: "var(--status-error)",
           }}
         >
-          <AlertCircle size={12} />
-          {error}
+          <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />
+          <p
+            className="min-w-0 flex-1 whitespace-pre-wrap break-all"
+            style={{ overflowWrap: "anywhere" }}
+          >
+            {error}
+          </p>
         </div>
       )}
 
