@@ -51,6 +51,7 @@ def route_after_tests(state: PrismState) -> str:
     if state.get("all_tests_passed") is True:
         logger.info("[graph] All tests passed — routing to pr_summarizer")
         return "pr_summarizer"
+    logger.info("[graph] Tests failed, empty collection, or error — routing to debugger")
     logger.info("[graph] Tests failed or error — routing to debugger")
     return "debugger"
 

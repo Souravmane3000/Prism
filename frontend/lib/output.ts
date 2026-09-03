@@ -38,11 +38,8 @@ export function classifyTestResults(
   const exitCode = raw.exit_code ?? 0;
   const collected = passed + failedCount > 0 || failedList.length > 0;
 
-  // Unknown framework + 0 collected is an empty sandbox dump, not a green suite.
-  if (!collected && (framework === "unknown" || framework === "")) {
-    return "did_not_run";
-  }
-  if (exitCode !== 0 && !collected) return "did_not_run";
+  // Zero collected tests is never a green suite (pytest.ini present is not enough).
+  if (!collected) return "did_not_run";
   if (failedCount > 0 || failedList.length > 0) return "failed";
   if (exitCode !== 0) return "failed";
   return "passed";

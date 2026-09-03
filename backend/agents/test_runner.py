@@ -92,11 +92,14 @@ def _build_run_script(framework: str) -> str:
     """Return the shell commands to install dependencies and run the test suite."""
     if framework in ("pytest", "unittest"):
         return (
-            "set -e\n"
+            "set +e\n"
             "cd /repo\n"
+            "export PYTHONPATH=/repo\n"
             "if [ -f requirements.txt ]; then pip install -r requirements.txt -q; fi\n"
             "if [ -f pyproject.toml ]; then pip install -e '.[dev]' -q 2>/dev/null || pip install -e . -q 2>/dev/null || true; fi\n"
-            "python -m pytest --tb=short --json-report --json-report-file=/tmp/report.json -q 2>&1 || true\n"
+            "python -m pytest -p json-report --json-report --json-report-file=/tmp/report.json "
+            "--tb=short -q 2>&1\n"
+            "echo PRISM_PYTEST_EXIT=$?\n"
             "cat /tmp/report.json 2>/dev/null || echo '{}'\n"
         )
     if framework == "jest":
@@ -116,6 +119,39 @@ def _build_run_script(framework: str) -> str:
     )
 
 
+def _suite_all_passed(
+    passed: list[str],
+    failed: list[TestFailure],
+    exit_code: int,
+) -> bool:
+    """True only when at least one test ran and none failed."""
+    collected = len(passed) + len(failed)
+    return collected > 0 and len(failed) == 0 and exit_code == 0
+
+
+def _pytest_exit_from_stdout(stdout: str, sandbox_exit: int) -> int:
+    """Prefer the pytest process code over the wrapper script's last-command exit."""
+    for line in stdout.splitlines():
+        if line.startswith("PRISM_PYTEST_EXIT="):
+            try:
+                return int(line.split("=", 1)[1].strip())
+            except ValueError:
+                break
+    return sandbox_exit
+
+
+def _empty_collection_failure(stdout: str, stderr: str) -> TestFailure:
+    log = f"{stdout}\n{stderr}".strip()
+    return TestFailure(
+        name="(no tests collected)",
+        traceback=log[:8_000],
+        message=(
+            "Test Runner collected 0 tests. That is not a passing suite; "
+            "Debugger must not be skipped."
+        ),
+    )
+
+
 def _parse_pytest_json(raw_json: str, stdout: str) -> tuple[list[str], list[TestFailure]]:
     """Parse pytest-json-report output into passed/failed lists.
 
@@ -129,6 +165,20 @@ def _parse_pytest_json(raw_json: str, stdout: str) -> tuple[list[str], list[Test
         data = json.loads(raw_json)
         tests = data.get("tests") or []
         if not tests:
+            summary = data.get("summary") or {}
+            n_passed = int(summary.get("passed") or 0)
+            n_failed = int(summary.get("failed") or 0) + int(summary.get("error") or 0)
+            if n_passed or n_failed:
+                passed = [f"(passed {i + 1})" for i in range(n_passed)]
+                failed = [
+                    TestFailure(
+                        name=f"(failed {i + 1})",
+                        traceback="",
+                        message="json-report summary had failures but tests[] was empty.",
+                    )
+                    for i in range(n_failed)
+                ]
+                return passed, failed
             raise ValueError("no tests in json report — falling back to stdout")
         for test in tests:
             name = test.get("nodeid", "unknown")
@@ -149,12 +199,14 @@ def _parse_pytest_json(raw_json: str, stdout: str) -> tuple[list[str], list[Test
                     )
                 )
     except (json.JSONDecodeError, KeyError, ValueError):
-        # Fallback: parse stdout for PASSED/FAILED lines
+        # Fallback: parse stdout for PASSED/FAILED lines and pytest -q letters
         for line in stdout.splitlines():
             if " PASSED" in line:
                 passed.append(line.strip())
-            elif " FAILED" in line or " ERROR" in line:
-                failed.append(TestFailure(name=line.strip(), traceback="", message=line.strip()))
+            elif " FAILED" in line or " ERROR" in line or line.strip().endswith(" FAILED"):
+                failed.append(
+                    TestFailure(name=line.strip(), traceback="", message=line.strip())
+                )
     return passed, failed
 
 
@@ -236,10 +288,18 @@ async def test_runner_node(state: PrismState, config: RunnableConfig) -> dict[st
             "fi\n"
             "echo \"PRISM_FRAMEWORK=$FRAMEWORK\"\n"
             "if [ \"$FRAMEWORK\" = 'pytest' ]; then\n"
-            "  pip install -q pytest pytest-json-report 2>/dev/null || true\n"
+            "  pip install -q pytest pytest-json-report || true\n"
             "  if [ -f requirements.txt ]; then pip install -q -r requirements.txt 2>/dev/null || true; fi\n"
             "  if [ -f pyproject.toml ]; then pip install -q -e '.[dev]' 2>/dev/null || pip install -q -e . 2>/dev/null || true; fi\n"
-            "  python -m pytest --tb=short --json-report --json-report-file=/tmp/report.json -q 2>&1 || true\n"
+            "  export PYTHONPATH=/repo\n"
+            "  echo 'PRISM_TREE'\n"
+            "  ls -la /repo | head -n 40\n"
+            "  ls -la /repo/tests 2>/dev/null || echo 'PRISM_NO_TESTS_DIR'\n"
+            "  set +e\n"
+            "  python -m pytest -p json-report --json-report --json-report-file=/tmp/report.json "
+            "--tb=short -q 2>&1\n"
+            "  echo \"PRISM_PYTEST_EXIT=$?\"\n"
+            "  set -e\n"
             "  echo 'PRISM_REPORT_START'\n"
             "  cat /tmp/report.json 2>/dev/null || echo '{}'\n"
             "  echo 'PRISM_REPORT_END'\n"
@@ -289,6 +349,7 @@ async def test_runner_node(state: PrismState, config: RunnableConfig) -> dict[st
                     logger.warning("[test_runner] Sandbox cleanup failed: %s", cleanup_exc)
 
         raw_stdout, raw_stderr, exit_code = await asyncio.to_thread(_run_sandbox_sync)
+        exit_code = _pytest_exit_from_stdout(raw_stdout, exit_code)
 
         # ── Detect framework from script output ────────────────────────────────
         framework = "unknown"
@@ -324,6 +385,9 @@ async def test_runner_node(state: PrismState, config: RunnableConfig) -> dict[st
         else:
             passed, failed = _parse_pytest_json(report_json, raw_stdout)
 
+        if not passed and not failed:
+            failed = [_empty_collection_failure(raw_stdout, raw_stderr)]
+
         stdout_stored = raw_stdout[:_MAX_OUTPUT_BYTES]
         stderr_stored = raw_stderr[:_MAX_OUTPUT_BYTES]
 
@@ -337,7 +401,7 @@ async def test_runner_node(state: PrismState, config: RunnableConfig) -> dict[st
             stdout=stdout_stored,
             stderr=stderr_stored,
         )
-        all_tests_passed = len(failed) == 0 and exit_code == 0
+        all_tests_passed = _suite_all_passed(passed, failed, exit_code)
 
         output_payload: dict[str, Any] = {
             "test_results": dict(test_results),

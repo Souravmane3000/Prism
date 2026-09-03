@@ -123,19 +123,19 @@ Do not start Phase 1 until Phase 0 docs are complete and treated as source of tr
 
 ## 9. Acceptance Checklist (MVP Demo)
 
-Proven on production ([live demo](https://prism-beta-one.vercel.app)). Remaining clicks are in [docs/MANUAL_TEST.md](docs/MANUAL_TEST.md).
+Proven on production ([live demo](https://prism-beta-one.vercel.app)). Manual steps live in [docs/MANUAL_TEST.md](docs/MANUAL_TEST.md).
 
 - [x] Start run with real repo + issue + PAT
 - [x] Planner output visible; HITL 1 **approve** works
-- [ ] HITL 1 **edit then approve** — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 2
+- [x] HITL 1 **edit then approve** — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 2
 - [x] File map and implementation plan visible; HITL 2 approve works
-- [x] Sandbox tests run; Debugger **skip** when there are no failures to debug
-- [ ] Debugger **runs** on a failing pytest suite — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 3
+- [x] Sandbox tests run; Debugger **skip** only when collected tests all passed
+- [x] Debugger **runs** when the suite failed or collected 0 tests (empty collection is not a pass) — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 3
 - [x] PR draft is recruiter-ready in the inspector
 - [x] Create-PR 404 on a repo the PAT cannot write is graceful
-- [ ] Create-PR **succeeds** on a repo you own — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 4
-- [ ] HITL Stop — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 1
-- [ ] Paste issue (not URL) — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 5
-- [ ] Reload / Recent Run hydrate — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 6
-- [ ] Wall time under 5 minutes excluding HITL wait — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 7
+- [x] Create-PR **succeeds** on a repo you own — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 4
+- [x] HITL Stop — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 1
+- [x] Paste issue (not URL) — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 5
+- [x] Reload / Recent Run hydrate — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 6
+- [x] Wall time under 5 minutes excluding HITL wait — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 7
 - [x] PAT absent from `PrismState`; DB hint is last four characters; logs use `***` redaction (code + unit tests). Spot-check Modal logs — [MANUAL_TEST.md](docs/MANUAL_TEST.md) row 8

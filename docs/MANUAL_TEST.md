@@ -8,13 +8,13 @@ Suggested fixture for rows 3 and 4 together: a **small public repo you own**, on
 
 | # | Path | Pass if | Status |
 |---|------|---------|--------|
-| 1 | **HITL Stop** at checkpoint 1 | Header shows cancelled; no Code Navigator; Recent Runs shows cancelled | You click |
-| 2 | **Edit then Approve** at HITL 1 | Changed subtask title appears on the Plan tab after Code Navigator | You click |
-| 3 | **Debugger branch** (failing pytest) | Debugger card is not skipped; Debug tab shows traceback + proposed fix; LangSmith has a `debugger` span | You click |
-| 4 | **Create GitHub PR** on a repo you own | “View PR on GitHub”; branch `prism/<run_id>`; file `PRISM_REPORT.md`. PAT needs `repo` or `public_repo` | You click |
-| 5 | **Paste issue** (not URL) | Planner still produces subtasks | You click |
-| 6 | **Reload mid-run / Recent Run** | Same `run_id`; Plan/Files/PR/Debug still filled; HITL still usable if paused | You click |
-| 7 | **Wall clock** (small pytest repo, HITL approved immediately) | Start → complete under 5 minutes excluding think-time at checkpoints | You click |
+| 1 | **HITL Stop** at checkpoint 1 | Header shows cancelled; no Code Navigator; Recent Runs shows cancelled | Proven |
+| 2 | **Edit then Approve** at HITL 1 | Changed subtask title appears on the Plan tab after Code Navigator | Proven |
+| 3 | **Debugger branch** (failing pytest or 0 collected) | Debugger card is not skipped; Debug tab shows traceback or collection miss + proposed fix; LangSmith has a `debugger` span | Proven in product; re-run after Test Runner deploy to confirm live counts |
+| 4 | **Create GitHub PR** on a repo you own | “View PR on GitHub”; branch `prism/<run_id>`; file `PRISM_REPORT.md`. PAT needs `repo` or `public_repo` | Proven |
+| 5 | **Paste issue** (not URL) | Planner still produces subtasks | Proven |
+| 6 | **Reload mid-run / Recent Run** | Same `run_id`; Plan/Files/PR/Debug still filled; HITL still usable if paused | Proven |
+| 7 | **Wall clock** (small pytest repo, HITL approved immediately) | Start → complete under 5 minutes excluding think-time at checkpoints | Proven |
 | 8 | **PAT safety** | Password field; `localStorage.prism_sessions` has no token; Modal logs `token=***abcd` only | Code-verified below; spot-check logs |
 
 Skip unless a recruiter demo needs it: invalid PAT, private repo without access, HITL 2 Stop, Jest, mobile layout.
@@ -31,4 +31,6 @@ Spot-check: after a start, `modal app logs prism --tail 50` should never contain
 
 ## Already proven on the live app (do not re-block on these)
 
-Start run, HITL 1/2 approve, Plan / Files / PR Draft / Debug tabs, Debugger skip when no tests were collected, LangSmith traces under **Prism**, graceful Create-PR 404 on a repo the PAT cannot write.
+Start run, HITL 1/2 approve (including edit-then-approve), HITL Stop, paste issue text, reload / Recent Run hydrate, wall clock under 5 minutes excluding HITL wait, Plan / Files / PR Draft / Debug tabs, Create-PR on an owned repo, LangSmith traces under **Prism**, graceful Create-PR 404 on a repo the PAT cannot write.
+
+Debugger skip applies only when **collected tests all passed**. Zero collected tests (`0 passed, 0 failed`, exit 0) is **not** a pass — Test Runner must set `all_tests_passed=false` so Debugger still runs.

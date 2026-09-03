@@ -101,7 +101,7 @@ Observability. With LangSmith env vars set at Modal startup and project name `"P
 5. **Code Navigator:** For each subtask, parallel semantic search (pgvector; embed+cache repo if needed) and GitHub path/keyword matching. Writes `file_map`, `file_contents`. Persists + Realtime.
 6. **Implementation Planner:** Per subtask + files, writes engineering plan into `implementation_plan`. Persists + Realtime. No code generation.
 7. **HITL 2:** Interrupt with plan payload. User approve/revise/stop via approve endpoint. Resume.
-8. **Test Runner:** Spawns Modal Sandbox, clones repo, detects pytest/unittest/jest, runs suite. Writes `test_results`, `all_tests_passed`. Persists + Realtime.
+8. **Test Runner:** Spawns Modal Sandbox, clones repo, detects pytest/unittest/jest, runs suite. Writes `test_results`, `all_tests_passed` (true only if at least one test ran and none failed; empty collection is not a pass). Persists + Realtime.
 9. **Route:** If `all_tests_passed` is true → PR Summarizer. Else → Debugger.
 10. **Debugger (optional):** Reads failures, cross-references file map and plan, writes `debug_report` with minimal fix proposals + confidence. Persists + Realtime.
 11. **PR Summarizer:** Reads full pipeline artifacts; writes `pr_draft` (title, body sections, checklist). Persists + Realtime. Run status → `completed` (or `awaiting_pr` if product chooses an intermediate state).

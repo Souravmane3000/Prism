@@ -137,6 +137,8 @@ HITL pauses use `interrupt_before=["hitl_1", "hitl_2"]` at compile time and a Su
 
 - Edges and conditional routing must match `GRAPH.md` exactly.
 - Conditional route after Test Runner reads `all_tests_passed` only.
+  `all_tests_passed` is true only when at least one test ran and none failed.
+  Zero collected tests is not a pass — route to Debugger.
 - Compile with Supabase-backed checkpointer; `thread_id` maps to `run_id`.
 - Resume path: `update_state` then `stream` / `ainvoke` — never “restart from planner” for a normal approve.
 

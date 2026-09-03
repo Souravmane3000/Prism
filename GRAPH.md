@@ -340,7 +340,7 @@ For `stop`: set run status `cancelled`; do not resume toward `test_runner`.
 | **Writes** | `test_results`, `all_tests_passed`, `current_agent`, `messages`, `error` |
 | **HITL interrupt** | No |
 | **Realtime / Supabase** | Start/complete; persist structured test results (truncate huge stdout/stderr if needed but keep failure tracebacks). |
-| **Behavior** | Create `Modal.Sandbox`. Clone repo. Detect framework from config (`pytest.ini`, `pyproject.toml`, `setup.cfg`, `package.json`, etc.). Run full suite. Parse pass/fail. Set `all_tests_passed = (failed_count == 0 and exit_code == 0)`. Never run tests in the main web process. |
+| **Behavior** | Create `Modal.Sandbox`. Clone repo. Detect framework from config (`pytest.ini`, `pyproject.toml`, `setup.cfg`, `package.json`, etc.). Run full suite. Parse pass/fail. Set `all_tests_passed` only when **at least one test ran** and none failed (`failed_count == 0`, `exit_code == 0`, collected > 0). Zero collected tests is **not** a pass — route to Debugger. Never run tests in the main web process. |
 | **Errors** | Sandbox/clone/timeout failures → `error`; set `all_tests_passed=false` and empty/partial `test_results` as appropriate so routing still works or API marks failed. |
 
 ---
@@ -353,7 +353,7 @@ For `stop`: set run status `cancelled`; do not resume toward `test_runner`.
 | **Writes** | `debug_report`, `current_agent`, `messages`, `error` |
 | **HITL interrupt** | No |
 | **Realtime / Supabase** | Start/complete; persist debug report. |
-| **Behavior** | Only reached when `all_tests_passed` is false. Per failing test: traceback → root cause → **minimal** targeted fix proposal + confidence. No full rewrites. |
+| **Behavior** | Only reached when `all_tests_passed` is false (failures **or** empty collection). Per failing test: traceback → root cause → **minimal** targeted fix proposal + confidence. If nothing was collected, explain that 0/0 is not a pass. No full rewrites. |
 | **Errors** | LLM failures → `error`; still allow PR summarizer to note incomplete debug if graph continues (prefer continue with partial report when possible). |
 
 ---

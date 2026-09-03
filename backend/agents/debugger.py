@@ -202,7 +202,11 @@ async def debugger_node(state: PrismState) -> dict[str, Any]:
                     f"The repository test suite did not execute (exit code {exit_code}). {detail}"
                 )
             else:
-                summary = "No failed tests to debug"
+                summary = (
+                    "No tests were collected (0 passed, 0 failed). That is not a passing "
+                    "suite, so Debugger ran anyway. Check Test Runner stdout for clone/"
+                    "pytest collection errors."
+                )
             empty_report = DebugReport(fixes=[], summary=summary)
             await save_agent_output(
                 run_id, "debugger", {"debug_report": dict(empty_report)}, "complete"

@@ -181,7 +181,7 @@ class TestClassifyTestResults:
                     "stdout": "",
                     "stderr": "",
                 },
-                "passed",
+                "did_not_run",
             ),
             (
                 {
@@ -224,7 +224,8 @@ class TestClassifyTestResults:
 
     def test_frontend_unknown_empty_suite_is_did_not_run(self):
         src = TS_OUTPUT.read_text(encoding="utf-8")
-        assert '!collected && (framework === "unknown"' in src
+        assert '!collected' in src
+        assert "did_not_run" in src
 
     def test_hitl_card_stays_hidden_after_later_agents(self):
         src = (ROOT / "frontend" / "lib" / "hitlVisibility.ts").read_text(

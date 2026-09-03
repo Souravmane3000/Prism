@@ -147,6 +147,35 @@ class TestDebuggerNode:
         assert "Sandboxes require an App" in summary
 
     @pytest.mark.asyncio
+    async def test_empty_collection_exit_zero_does_not_claim_success(
+        self, mock_debug_supabase, mock_debug_llm
+    ):
+        """0 collected + exit 0 still produces a Debugger summary (not a skip)."""
+        from backend.agents.debugger import debugger_node
+
+        state = {
+            "run_id": "run-001",
+            "test_results": {
+                "framework": "pytest",
+                "passed": [],
+                "failed": [],
+                "passed_count": 0,
+                "failed_count": 0,
+                "exit_code": 0,
+                "stdout": "collected 0 items",
+                "stderr": "",
+            },
+            "file_map": {},
+            "file_contents": {},
+            "implementation_plan": [],
+        }
+
+        result = await debugger_node(state)
+        mock_debug_llm.ainvoke.assert_not_called()
+        summary = result["debug_report"]["summary"]
+        assert "not a passing" in summary.lower() or "collected" in summary.lower()
+
+    @pytest.mark.asyncio
     async def test_llm_parse_failure_appends_fallback_fix(self, mock_debug_supabase):
         """Bad LLM JSON response produces a fallback fix with confidence=0.0."""
         bad_llm = MagicMock()

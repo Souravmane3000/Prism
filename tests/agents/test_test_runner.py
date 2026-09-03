@@ -93,6 +93,15 @@ class TestParsePytestJson:
         assert len(failed) == 1
         assert failed[0]["name"] == "test_bar::test_fail"
 
+    def test_uses_summary_when_tests_array_empty(self):
+        """json-report summary counts are used when tests[] is missing."""
+        from backend.agents.test_runner import _parse_pytest_json
+
+        report = {"summary": {"passed": 2, "failed": 1, "total": 3}, "tests": []}
+        passed, failed = _parse_pytest_json(json.dumps(report), "")
+        assert len(passed) == 2
+        assert len(failed) == 1
+
     def test_falls_back_to_stdout_parsing_when_json_empty(self):
         """Falls back to stdout line-parsing when JSON report is empty."""
         from backend.agents.test_runner import _parse_pytest_json
@@ -127,11 +136,11 @@ class TestParseJestJson:
 
 class TestTestRunnerNode:
     @pytest.mark.asyncio
-    async def test_returns_all_tests_passed_true_when_exit_code_zero(
+    async def test_empty_collection_is_not_all_tests_passed(
         self, mock_runner_supabase, force_modal_sandbox
     ):
-        """When sandbox exits with 0 and no failures, all_tests_passed=True."""
-        stdout = "PRISM_FRAMEWORK=pytest\nPRISM_REPORT_START\n{}\nPRISM_REPORT_END\n2 passed in 0.1s\n"
+        """0 collected tests with exit 0 is not a green suite — Debugger must run."""
+        stdout = "PRISM_FRAMEWORK=pytest\nPRISM_PYTEST_EXIT=5\nPRISM_REPORT_START\n{}\nPRISM_REPORT_END\n"
 
         with patch(
             "asyncio.to_thread",
@@ -139,12 +148,44 @@ class TestTestRunnerNode:
         ):
             from backend.agents.test_runner import test_runner_node
 
-            state = {
-                "run_id": "run-001",
-                "repo_url": "https://github.com/owner/repo",
-            }
+            result = await test_runner_node(
+                {
+                    "run_id": "run-001",
+                    "repo_url": "https://github.com/owner/repo",
+                },
+                _make_config(),
+            )
 
-            result = await test_runner_node(state, _make_config())
+        assert result["all_tests_passed"] is False
+        assert result["test_results"]["failed_count"] >= 1
+        assert result["test_results"]["exit_code"] == 5
+
+    @pytest.mark.asyncio
+    async def test_returns_all_tests_passed_true_when_tests_pass(
+        self, mock_runner_supabase, force_modal_sandbox
+    ):
+        """When tests actually pass, all_tests_passed=True."""
+        stdout = (
+            "PRISM_FRAMEWORK=pytest\n"
+            "PRISM_PYTEST_EXIT=0\n"
+            "PRISM_REPORT_START\n"
+            '{"tests":[{"nodeid":"test_ok","outcome":"passed"}]}\n'
+            "PRISM_REPORT_END\n"
+        )
+
+        with patch(
+            "asyncio.to_thread",
+            new=AsyncMock(return_value=(stdout, "", 0)),
+        ):
+            from backend.agents.test_runner import test_runner_node
+
+            result = await test_runner_node(
+                {
+                    "run_id": "run-001",
+                    "repo_url": "https://github.com/owner/repo",
+                },
+                _make_config(),
+            )
 
         assert result["all_tests_passed"] is True
         assert result["current_agent"] == "test_runner"
@@ -232,3 +273,34 @@ class TestTestRunnerNode:
             await test_runner_node(state, _make_config())
 
         assert len(to_thread_calls) >= 1, "asyncio.to_thread must be called for sandbox execution"
+
+
+class TestSuiteAllPassed:
+    def test_empty_collection_is_false(self):
+        from backend.agents.test_runner import _suite_all_passed
+
+        assert _suite_all_passed([], [], 0) is False
+
+    def test_one_passed_test_is_true(self):
+        from backend.agents.test_runner import _suite_all_passed
+
+        assert _suite_all_passed(["test_ok"], [], 0) is True
+
+    def test_nonzero_exit_is_false(self):
+        from backend.agents.test_runner import _suite_all_passed
+
+        assert _suite_all_passed(["test_ok"], [], 1) is False
+
+
+class TestPytestExitFromStdout:
+    def test_prefers_marker_over_sandbox_exit(self):
+        from backend.agents.test_runner import _pytest_exit_from_stdout
+
+        stdout = "PRISM_FRAMEWORK=pytest\nPRISM_PYTEST_EXIT=5\n{}\n"
+        assert _pytest_exit_from_stdout(stdout, 0) == 5
+
+    def test_falls_back_to_sandbox_exit(self):
+        from backend.agents.test_runner import _pytest_exit_from_stdout
+
+        assert _pytest_exit_from_stdout("no marker\n", 0) == 0
+
