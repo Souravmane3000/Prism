@@ -167,6 +167,33 @@ class TestGetRunStatus:
         assert "detail" in data
 
 
+class TestDeleteRun:
+    def test_delete_known_run_returns_200(self, test_client):
+        run_id = "550e8400-e29b-41d4-a716-446655440000"
+        with patch(
+            "backend.routers.runs.delete_run_record",
+            new=AsyncMock(return_value=True),
+        ):
+            response = test_client.delete(f"/api/runs/{run_id}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["run_id"] == run_id
+        assert data["deleted"] is True
+
+    def test_delete_unknown_run_returns_404(self, test_client):
+        run_id = "550e8400-e29b-41d4-a716-446655440000"
+        with patch(
+            "backend.routers.runs.delete_run_record",
+            new=AsyncMock(return_value=False),
+        ):
+            response = test_client.delete(f"/api/runs/{run_id}")
+        assert response.status_code == 404
+
+    def test_delete_invalid_uuid_returns_404(self, test_client):
+        response = test_client.delete("/api/runs/not-a-uuid")
+        assert response.status_code == 404
+
+
 class TestApproveRun:
     def test_approve_when_not_awaiting_returns_409(self, test_client):
         """POST /api/runs/{id}/approve when status is not awaiting_approval returns 409."""

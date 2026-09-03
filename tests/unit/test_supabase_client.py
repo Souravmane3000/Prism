@@ -15,6 +15,7 @@ def _make_execute_chain(return_data=None):
     chain = MagicMock()
     chain.insert.return_value = chain
     chain.update.return_value = chain
+    chain.delete.return_value = chain
     chain.select.return_value = chain
     chain.upsert.return_value = chain
     chain.eq.return_value = chain
@@ -111,6 +112,40 @@ class TestPingPostgres:
 
             with pytest.raises(RuntimeError, match="no row"):
                 await ping_postgres()
+
+
+class TestDeleteRun:
+    @pytest.mark.asyncio
+    async def test_returns_true_when_sql_deletes_a_row(self):
+        with (
+            patch(
+                "backend.supabase_client._sql_execute",
+                new=AsyncMock(),
+            ),
+            patch(
+                "backend.supabase_client._sql_fetchone",
+                new=AsyncMock(return_value={"id": "run-001"}),
+            ),
+        ):
+            from backend.supabase_client import delete_run
+
+            assert await delete_run("run-001") is True
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_sql_finds_no_row(self):
+        with (
+            patch(
+                "backend.supabase_client._sql_execute",
+                new=AsyncMock(),
+            ),
+            patch(
+                "backend.supabase_client._sql_fetchone",
+                new=AsyncMock(return_value=None),
+            ),
+        ):
+            from backend.supabase_client import delete_run
+
+            assert await delete_run("run-missing") is False
 
 
 class TestCreateRun:

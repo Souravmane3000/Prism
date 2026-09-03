@@ -26,7 +26,7 @@ import RunForm from "@/components/input/RunForm";
 import ActivityStream from "@/components/stream/ActivityStream";
 import OutputInspector from "@/components/output/OutputInspector";
 import { useSupabaseRealtime } from "@/lib/useSupabaseRealtime";
-import { getRunOutput } from "@/lib/api";
+import { getRunOutput, deleteRun, ApiError } from "@/lib/api";
 import { materializeRunOutput } from "@/lib/output";
 import type {
   RunOutputResponse,
@@ -191,6 +191,35 @@ export default function PrismWorkspace() {
     });
   }, [activeRunId]);
 
+  const handleDeleteSession = useCallback(
+    async (runId: string) => {
+      try {
+        await deleteRun(runId);
+      } catch (err) {
+        if (!(err instanceof ApiError && err.httpStatus === 404)) {
+          throw err;
+        }
+      }
+
+      setSessions((prev) => {
+        const updated = prev.filter((s) => s.run_id !== runId);
+        try {
+          localStorage.setItem("prism_sessions", JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+
+      if (activeRunId === runId) {
+        setActiveRunId(null);
+        setRunOutput(null);
+        setPrUrl(null);
+        setResolvedCheckpoints(new Set());
+        lastOutputCountRef.current = 0;
+      }
+    },
+    [activeRunId],
+  );
+
   const currentRunStatus = runStatus?.status ?? runOutput?.status ?? null;
 
   const displayOutput = useMemo(() => {
@@ -221,6 +250,7 @@ export default function PrismWorkspace() {
               sessions={sessions}
               activeRunId={activeRunId}
               onSelectSession={handleSelectSession}
+              onDeleteSession={handleDeleteSession}
             >
               <RunForm onRunStarted={handleRunStarted} onPatChange={setPat} />
             </Sidebar>

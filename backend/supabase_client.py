@@ -535,6 +535,63 @@ async def get_run(run_id: str) -> Optional[dict[str, Any]]:
         raise
 
 
+_CHECKPOINT_DELETE_SQL = (
+    "DELETE FROM checkpoint_writes WHERE thread_id = %s",
+    "DELETE FROM checkpoint_blobs WHERE thread_id = %s",
+    "DELETE FROM checkpoints WHERE thread_id = %s",
+)
+
+
+async def _delete_langgraph_thread(run_id: str) -> None:
+    """Best-effort cleanup of LangGraph checkpointer rows for this thread."""
+    for query in _CHECKPOINT_DELETE_SQL:
+        try:
+            await _sql_execute(query, (run_id,))
+        except Exception as exc:
+            logger.info(
+                "Skipping checkpointer cleanup for run %s (%s)",
+                run_id,
+                type(exc).__name__,
+            )
+
+
+async def delete_run(run_id: str) -> bool:
+    """
+    Delete a pipeline run.
+
+    Cascades to agent_outputs and hitl_checkpoints (FK ON DELETE CASCADE).
+    Embeddings and repo_cache stay — they are keyed by repo_url, not run_id.
+    Returns True if a runs row was removed.
+    """
+
+    async def _sql() -> bool:
+        await _delete_langgraph_thread(run_id)
+        row = await _sql_fetchone(
+            "DELETE FROM runs WHERE id = %s::uuid RETURNING id",
+            (run_id,),
+        )
+        return row is not None
+
+    def _rest() -> bool:
+        client = get_supabase()
+        existing = (
+            client.table("runs").select("id").eq("id", run_id).limit(1).execute()
+        )
+        if not existing.data:
+            return False
+        client.table("runs").delete().eq("id", run_id).execute()
+        return True
+
+    try:
+        deleted = await _with_sql_fallback(_rest, _sql)
+        if deleted:
+            logger.info("Deleted run %s", run_id)
+        return deleted
+    except Exception as exc:
+        logger.error("Supabase error deleting run %s: %s", run_id, exc, exc_info=True)
+        raise
+
+
 async def get_run_outputs(run_id: str) -> list[dict[str, Any]]:
     """Fetch all agent_output rows for a run, ordered by creation time."""
     client = get_supabase()

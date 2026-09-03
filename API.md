@@ -43,7 +43,7 @@ Consistent envelope:
 
 - Allow origin from env var `FRONTEND_ORIGIN` (Vercel frontend URL).
 - Allow credentials only if required by design; MVP typically needs `Authorization`-free browser calls with PAT in JSON body — still restrict origin strictly.
-- Allow methods: `GET`, `POST`, `OPTIONS`.
+- Allow methods: `GET`, `POST`, `DELETE`, `OPTIONS`.
 - Allow headers: `Content-Type`, `Accept`.
 
 ### Logging
@@ -272,6 +272,32 @@ Prism’s Option B includes **real PR creation**. For MVP, `create-pr` uses PyGi
 
 ---
 
+### 2.6 `DELETE /api/runs/{id}`
+
+Removes a run so the same repo/issue can be started again from a blank pipeline.
+
+**No request body.** GitHub PAT is not required.
+
+**Server behavior:**
+
+1. Validate `id` is a UUID.
+2. Delete LangGraph checkpointer rows for `thread_id=id` when those tables exist.
+3. Delete the `runs` row. `agent_outputs` and `hitl_checkpoints` cascade.
+4. Do **not** delete `code_embeddings` or `repo_cache` (shared per repo URL).
+
+**Response `200`:**
+
+```json
+{
+  "run_id": "550e8400-e29b-41d4-a716-446655440000",
+  "deleted": true
+}
+```
+
+**Error `404`:** Unknown or malformed `run_id`.
+
+---
+
 ## 3. Realtime Instead of SSE
 
 ### Decision
@@ -326,6 +352,7 @@ There is **no** FastAPI SSE (or WebSocket) streaming endpoint for agent events.
 | `RunOutputResponse` | `GET /api/runs/{id}/output` |
 | `ApproveRunRequest` / `ApproveRunResponse` | `POST /api/runs/{id}/approve` |
 | `CreatePRRequest` / `CreatePRResponse` | `POST /api/runs/{id}/create-pr` |
+| `DeleteRunResponse` | `DELETE /api/runs/{id}` |
 | `ErrorResponse` | all error paths |
 
 All fields fully typed; no `dict[str, Any]` in public response models unless constrained (`payload` internals may be structured TypedDicts serialized to JSON).
@@ -350,3 +377,4 @@ All fields fully typed; no `dict[str, Any]` in public response models unless con
 | `GET /status` | Read Supabase `runs` (not raw checkpointer) |
 | `GET /output` | Join `runs` + latest `agent_outputs` / materialized output columns |
 | `POST /create-pr` | No graph node; uses completed `pr_draft` + GitHub API |
+| `DELETE /{id}` | No graph node; deletes run + checkpoint thread |

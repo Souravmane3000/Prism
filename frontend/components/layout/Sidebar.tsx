@@ -8,14 +8,15 @@
 
 "use client";
 
-import { Clock, GitBranch } from "lucide-react";
-import type { ReactNode } from "react";
+import { Clock, GitBranch, Loader2, Trash2 } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import type { SessionRecord } from "@/lib/types";
 
 interface SidebarProps {
   sessions: SessionRecord[];
   activeRunId: string | null;
   onSelectSession: (runId: string) => void;
+  onDeleteSession: (runId: string) => Promise<void>;
   children: ReactNode; // RunForm
 }
 
@@ -41,8 +42,24 @@ export default function Sidebar({
   sessions,
   activeRunId,
   onSelectSession,
+  onDeleteSession,
   children,
 }: SidebarProps) {
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function handleDelete(runId: string) {
+    if (deletingId) return;
+    setDeletingId(runId);
+    try {
+      await onDeleteSession(runId);
+    } catch {
+      // Keep the card if the API call failed (other than 404, which the
+      // parent treats as already gone).
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div
       className="flex flex-col h-full overflow-hidden border-r"
@@ -73,11 +90,14 @@ export default function Sidebar({
             <div className="flex flex-col gap-1">
               {sessions.map((session) => {
                 const isActive = session.run_id === activeRunId;
+                const isDeleting = deletingId === session.run_id;
+                const repoLabel = session.repo_url
+                  .replace("https://github.com/", "")
+                  .slice(0, 28);
                 return (
-                  <button
+                  <div
                     key={session.run_id}
-                    onClick={() => onSelectSession(session.run_id)}
-                    className="w-full text-left p-2.5 rounded-lg transition-all duration-150"
+                    className="relative rounded-lg transition-all duration-150"
                     style={{
                       backgroundColor: isActive
                         ? "var(--bg-active)"
@@ -87,55 +107,91 @@ export default function Sidebar({
                         : "1px solid transparent",
                     }}
                   >
-                    {/* Repo path */}
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <GitBranch
-                        size={10}
-                        style={{ color: "var(--text-dim)", flexShrink: 0 }}
-                      />
-                      <span
-                        className="text-xs truncate"
-                        style={{
-                          color: isActive
-                            ? "var(--text-primary)"
-                            : "var(--text-secondary)",
-                        }}
-                      >
-                        {session.repo_url
-                          .replace("https://github.com/", "")
-                          .slice(0, 28)}
-                      </span>
-                    </div>
-
-                    {/* Status + time */}
-                    <div className="flex items-center justify-between">
-                      <span
-                        className="inline-flex items-center gap-1 text-xs"
-                        style={{
-                          color:
-                            STATUS_COLORS[session.status] ??
-                            "var(--text-dim)",
-                        }}
-                      >
+                    <button
+                      type="button"
+                      onClick={() => onSelectSession(session.run_id)}
+                      className="w-full text-left p-2.5 pr-8 rounded-lg"
+                    >
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <GitBranch
+                          size={10}
+                          style={{ color: "var(--text-dim)", flexShrink: 0 }}
+                        />
                         <span
-                          className="w-1 h-1 rounded-full inline-block"
+                          className="text-xs truncate"
                           style={{
-                            backgroundColor:
+                            color: isActive
+                              ? "var(--text-primary)"
+                              : "var(--text-secondary)",
+                          }}
+                        >
+                          {repoLabel}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span
+                          className="inline-flex items-center gap-1 text-xs"
+                          style={{
+                            color:
                               STATUS_COLORS[session.status] ??
                               "var(--text-dim)",
                           }}
+                        >
+                          <span
+                            className="w-1 h-1 rounded-full inline-block"
+                            style={{
+                              backgroundColor:
+                                STATUS_COLORS[session.status] ??
+                                "var(--text-dim)",
+                            }}
+                          />
+                          {session.status.replace("_", " ")}
+                        </span>
+                        <span
+                          className="flex items-center gap-0.5 text-xs"
+                          style={{ color: "var(--text-dim)" }}
+                        >
+                          <Clock size={9} />
+                          {timeAgo(session.created_at)}
+                        </span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      aria-label={`Delete run ${repoLabel}`}
+                      title="Remove this run"
+                      disabled={isDeleting}
+                      onClick={() => {
+                        void handleDelete(session.run_id);
+                      }}
+                      className="absolute top-1.5 right-1.5 p-1 rounded transition-colors"
+                      style={{
+                        color: "var(--text-dim)",
+                        backgroundColor: "transparent",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = "var(--danger-text)";
+                        e.currentTarget.style.backgroundColor =
+                          "var(--danger-bg)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = "var(--text-dim)";
+                        e.currentTarget.style.backgroundColor = "transparent";
+                      }}
+                    >
+                      {isDeleting ? (
+                        <Loader2
+                          size={11}
+                          className="animate-spin"
+                          style={{ color: "var(--danger-text)" }}
                         />
-                        {session.status.replace("_", " ")}
-                      </span>
-                      <span
-                        className="flex items-center gap-0.5 text-xs"
-                        style={{ color: "var(--text-dim)" }}
-                      >
-                        <Clock size={9} />
-                        {timeAgo(session.created_at)}
-                      </span>
-                    </div>
-                  </button>
+                      ) : (
+                        <Trash2 size={11} />
+                      )}
+                    </button>
+                  </div>
                 );
               })}
             </div>

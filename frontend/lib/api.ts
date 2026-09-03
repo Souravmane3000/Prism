@@ -16,6 +16,7 @@ import type {
   ApiErrorDetail,
   CreatePRRequest,
   CreatePRResponse,
+  DeleteRunResponse,
   RunOutputResponse,
   RunStatusResponse,
   StartRunRequest,
@@ -184,5 +185,15 @@ export function createPR(
     method: "POST",
     headers: JSON_HEADERS,
     body: JSON.stringify(body),
+  });
+}
+
+/**
+ * DELETE /api/runs/{id}
+ * Removes the run and cascaded pipeline rows so the same issue can be demoed again.
+ */
+export function deleteRun(runId: string): Promise<DeleteRunResponse> {
+  return request<DeleteRunResponse>(`/api/runs/${runId}`, {
+    method: "DELETE",
   });
 }

@@ -24,7 +24,7 @@
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                   FASTAPI ON MODAL (@modal.web_endpoint)                  │
 │                                                                           │
-│  Routes: /api/runs/start | status | output | approve | create-pr          │
+│  Routes: start | status | output | approve | create-pr | DELETE /{id}     │
 │  Holds in-flight GitHub PAT (never persisted)                             │
 │  Compiles & drives LangGraph with Supabase-backed checkpointer            │
 └───────────────┬──────────────────────────────────────────────────────────┘

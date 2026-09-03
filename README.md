@@ -173,6 +173,7 @@ Prism/
 | `GET` | `/api/runs/{id}/output` | Full artifacts (subtasks, file map, plan, tests, PR draft). |
 | `POST` | `/api/runs/{id}/approve` | Resume after HITL 1 or 2 (approve / edit / stop). |
 | `POST` | `/api/runs/{id}/create-pr` | Open a GitHub PR from the finished draft. |
+| `DELETE` | `/api/runs/{id}` | Remove a run so the same issue can be demoed again. |
 | `GET` | `/health` | Liveness. |
 
 PAT is sent in the JSON body on start, approve, and create-pr, used in-flight, and discarded. Responses never include it.

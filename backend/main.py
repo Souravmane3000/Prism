@@ -99,7 +99,7 @@ app.add_middleware(
     allow_origins=_FRONTEND_ORIGINS,
     allow_origin_regex=_FRONTEND_ORIGIN_REGEX,
     allow_credentials=False,  # PAT is in JSON body, not cookies — no credentials needed
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Accept"],
 )
 

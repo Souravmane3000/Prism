@@ -1,12 +1,13 @@
 """
 backend/routers/runs.py — All /api/runs/* route handlers.
 
-Implements the five endpoints specified in API.md:
+Implements the endpoints specified in API.md:
   POST   /api/runs/start
   GET    /api/runs/{id}/status
   GET    /api/runs/{id}/output
   POST   /api/runs/{id}/approve
   POST   /api/runs/{id}/create-pr
+  DELETE /api/runs/{id}
 
 Security:
 - GitHub PAT is accepted in request body for start/approve/create-pr.
@@ -20,6 +21,7 @@ import asyncio
 import inspect
 import logging
 import re
+import uuid
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -42,6 +44,7 @@ from backend.state import PrismState
 from backend.supabase_client import (
     create_checkpoint,
     create_run,
+    delete_run as delete_run_record,
     get_run,
     get_run_outputs,
     is_transient_http_error,
@@ -267,6 +270,11 @@ class CreatePRResponse(BaseModel):
     pr_url: str
     pr_number: Optional[int] = None
     title: str
+
+
+class DeleteRunResponse(BaseModel):
+    run_id: str
+    deleted: bool = True
 
 
 class ErrorDetail(BaseModel):
@@ -703,6 +711,51 @@ async def start_run(
     logger.info("[runs] Run %s started — pipeline queued", run_id)
 
     return StartRunResponse(run_id=run_id, status="running", current_agent="planner")
+
+
+@router.delete(
+    "/runs/{run_id}",
+    response_model=DeleteRunResponse,
+    summary="Delete a run and its pipeline artifacts",
+)
+async def delete_pipeline_run(run_id: str) -> DeleteRunResponse:
+    """
+    Remove a run from Supabase so the same repo/issue can be demonstrated
+    from a clean Start Run. Cascades agent_outputs and hitl_checkpoints.
+    Does not delete repo embeddings (shared across runs for that URL).
+    """
+    logger.info("[runs] DELETE /runs/%s", run_id)
+    try:
+        uuid.UUID(run_id)
+    except ValueError:
+        raise _error_response(
+            "not_found",
+            f"Run {run_id} not found",
+            status.HTTP_404_NOT_FOUND,
+            run_id,
+        )
+
+    try:
+        removed = await delete_run_record(run_id)
+    except Exception as exc:
+        logger.error("[runs] DB error deleting run %s: %s", run_id, exc, exc_info=True)
+        raise _error_response(
+            "db_error",
+            "Failed to delete run",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            run_id,
+            details={"exception_type": type(exc).__name__},
+        )
+
+    if not removed:
+        raise _error_response(
+            "not_found",
+            f"Run {run_id} not found",
+            status.HTTP_404_NOT_FOUND,
+            run_id,
+        )
+
+    return DeleteRunResponse(run_id=run_id, deleted=True)
 
 
 @router.get(

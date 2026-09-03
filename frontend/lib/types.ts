@@ -182,6 +182,11 @@ export interface CreatePRResponse {
   title: string;
 }
 
+export interface DeleteRunResponse {
+  run_id: string;
+  deleted: boolean;
+}
+
 export interface ApiErrorDetail {
   code: string;
   message: string;
