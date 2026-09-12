@@ -92,7 +92,7 @@ export function normalizeTestResults(
     ? record.passed.map((item) => String(item))
     : [];
 
-  return {
+  const result: TestResults = {
     framework: asString(record.framework, "unknown"),
     passed,
     failed,
@@ -104,6 +104,13 @@ export function normalizeTestResults(
     stdout: asString(record.stdout),
     stderr: asString(record.stderr),
   };
+  if (typeof record.command === "string") result.command = record.command;
+  if (typeof record.duration_ms === "number") result.duration_ms = record.duration_ms;
+  if (typeof record.truncated === "boolean") result.truncated = record.truncated;
+  if (typeof record.failure_category === "string") {
+    result.failure_category = record.failure_category;
+  }
+  return result;
 }
 
 export function normalizeDebugReport(
@@ -128,7 +135,11 @@ export function normalizeDebugReport(
     : [];
 
   if (!summary && fixes.length === 0) return null;
-  return { summary, fixes };
+  const report: DebugReport = { summary, fixes };
+  if (typeof record.can_generate_fix === "boolean") {
+    report.can_generate_fix = record.can_generate_fix;
+  }
+  return report;
 }
 
 function isNonEmptyArray(val: unknown): val is unknown[] {

@@ -2,7 +2,7 @@
 
 **A multi-agent software engineering teammate.**
 
-Give Prism a GitHub repository and an issue. It reads the codebase, breaks the work into subtasks, finds the relevant files, writes a step-by-step implementation plan, runs the test suite in an isolated sandbox, debugs failures, and drafts a professional pull request. You stay in control at two approval gates.
+Give Prism a GitHub repository and an issue. It reads the codebase, breaks the work into subtasks, finds the relevant files, writes a step-by-step implementation plan, generates a structured patch, applies it in an isolated clone, runs the real test suite, and can diagnose and repair failing tests up to three verification attempts before rolling back. You stay in control at two approval gates. Diff Reviewer / HITL #3 are not in this phase.
 
 Prism plans and evaluates first. It does not silently rewrite your application.
 
@@ -15,7 +15,7 @@ Prism plans and evaluates first. It does not silently rewrite your application.
 [![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20pgvector-3FCF8E?logo=supabase&logoColor=white&labelColor=0a0d08)](https://supabase.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-7C3AED?labelColor=0a0d08)](LICENSE)
 
-**[Live demo](https://prism-beta-one.vercel.app)** · **[How the graph works](GRAPH.md)** · **[Architecture](ARCHITECTURE.md)** · **[API](API.md)**
+**[Live demo](https://prism-beta-one.vercel.app)** · **[How the graph works](GRAPH.md)** · **[Phase 4 graph](GRAPH_V2.md)** · **[Architecture](ARCHITECTURE.md)** · **[API](API.md)**
 
 <p align="center">
   <img src="docs/assets/prism-workspace.png" alt="Prism workspace: left panel to start a run, center live agent stream, right tabbed Plan / Files / PR Draft / Debug output" width="100%" />
@@ -33,7 +33,7 @@ That makes this repo useful in two ways:
 
 | If you are… | What to look at |
 | --- | --- |
-| A recruiter or hiring manager | The live demo, the six-agent pipeline below, and the tech stack. This is an end-to-end AI systems project, not a chatbot wrapper. |
+| A recruiter or hiring manager | The live demo, the Phase 4 pipeline below, and the tech stack. This is an end-to-end AI systems project, not a chatbot wrapper. |
 | An engineer reviewing the code | Deterministic LangGraph routing, interrupt-based human-in-the-loop, a durable Postgres checkpointer, PAT never stored in the database, and tests that never run in the API process. |
 
 ---
@@ -45,16 +45,17 @@ That makes this repo useful in two ways:
 3. **You approve or edit** that breakdown (checkpoint 1).
 4. **Code Navigator** maps each subtask to files using pgvector semantic search plus the GitHub API.
 5. **Implementation Planner** writes a step-by-step plan: what to change, where, why, and the tradeoffs. It does not generate application code.
-6. **You approve or revise** that plan (checkpoint 2). This is the last gate before tests run.
-7. **Test Runner** clones the repo into a Modal sandbox, detects pytest / unittest / Jest, and runs the suite.
-8. If tests fail, **Debugger** turns tracebacks into root causes and minimal fix proposals. If they pass, Debugger is skipped.
-9. **PR Summarizer** writes a professional PR body from the full pipeline. Optionally, Prism opens a real GitHub PR with a `PRISM_REPORT.md` on a `prism/<run_id>` branch.
+6. **You approve or revise** that plan (checkpoint 2). This is the last human gate in Phase 4.
+7. **Code Modifier** generates a structured patch. **Validate** then **Apply** run it in an isolated clone at `baseline_sha` (not the Prism checkout).
+8. **Test Runner** reconstructs that applied workspace and runs pytest. Passing tests mark the patch `VERIFIED` but do **not** mark the session `SUCCESS`.
+9. If tests fail, **Debugger** may propose a focused fix (`fix_patch`) that is validated and applied without HITL #3. Maximum **three** Test Runner attempts. A third failure rolls back to `baseline_sha` (`FAILED_MAX_VERIFICATION`). Environment/infra failures end the run without Debugger.
+10. **PR Summarizer** writes a professional PR body from the pipeline. Optionally, Prism opens a real GitHub PR with a `PRISM_REPORT.md` on a `prism/<run_id>` branch.
 
 Typical wall time for a non-trivial repo is under five minutes, not counting how long you spend at the two approval screens.
 
 ---
 
-## The six agents
+## The pipeline (Phase 4)
 
 ```mermaid
 flowchart LR
@@ -62,20 +63,26 @@ flowchart LR
   H1 --> B[Code Navigator]
   B --> C[Implementation Planner]
   C --> H2[You approve the plan]
-  H2 --> D[Test Runner]
-  D --> R{Tests passed?}
-  R -->|No| E[Debugger]
-  R -->|Yes| F[PR Summarizer]
-  E --> F
+  H2 --> CM[Code Modifier]
+  CM --> V[Validate and Apply]
+  V --> D[Test Runner]
+  D --> R{Tests}
+  R -->|PASS| F[PR Summarizer]
+  R -->|FAIL attempts under 3| E[Debugger then Fix Patch]
+  E --> V
+  R -->|FAIL attempt 3| RB[Rollback]
 ```
+
+The product agents are Planner, Code Navigator, Implementation Planner, Code Modifier, Test Runner, Debugger, and PR Summarizer. `fix_patch` is Debugger recovery, not a ninth agent. Diff Reviewer and HITL #3 are not implemented. See [GRAPH_V2.md](GRAPH_V2.md).
 
 | Agent | Job | LLM-heavy? |
 | --- | --- | --- |
 | **Planner** | Turns the issue + repo tree into ordered subtasks with dependencies, file hints, and complexity. | Yes |
 | **Code Navigator** | Finds the files that actually matter. Semantic search over cached embeddings, plus GitHub path/keyword matching. | No — tools first |
 | **Implementation Planner** | Writes an engineering plan per subtask: file, symbol, change, rationale, tradeoffs. | Yes |
-| **Test Runner** | Clones the repo in `Modal.Sandbox` and runs the real suite. Never executes user code in the API process. | No |
-| **Debugger** | Only if tests fail. Symptom → root cause → targeted fix proposal with a confidence score. | Yes |
+| **Code Modifier** | Generates a structured patch from the approved plan. Does not apply it to the Prism checkout. | Yes |
+| **Test Runner** | Reconstructs the applied workspace and runs pytest (Modal in production, isolated local clone in dev). | No |
+| **Debugger** | Only if tests fail with attempts remaining. Symptom → root cause → targeted fix; Fix Patch applies a cumulative diff. | Yes |
 | **PR Summarizer** | Composes title, what/why, test notes, limitations, and a review checklist. | Yes |
 
 Two extra graph nodes — `hitl_1` and `hitl_2` — are not agents. They are **LangGraph interrupts**. The pipeline literally pauses, the UI shows an approval card, and FastAPI resumes the same `run_id` from a Postgres-backed checkpointer. That is required because the API runs on serverless Modal workers that do not keep memory between HTTP requests.
@@ -101,7 +108,7 @@ flowchart TB
 | --- | --- |
 | **Next.js (Vercel)** | Dark three-panel workspace. Left: sessions + run form. Center: live agent stream. Right: Plan / Files / PR Draft / Debug. |
 | **FastAPI (Modal)** | Control plane. Creates a `run_id`, drives the graph, exposes status/output/approve/create-pr. |
-| **LangGraph** | Eight-node `StateGraph` with one conditional edge after tests. Single compiled graph per process. |
+| **LangGraph** | Phase 4 `StateGraph`: HITL #1/#2, then Code Modifier → validate → apply → Test Runner, with an attempt-capped debug/fix loop. Single compiled graph per process. |
 | **Supabase** | System of record: runs, agent outputs, HITL payloads, embedding cache, and the LangGraph checkpointer. Realtime pushes agent start/complete events to the UI. |
 | **OpenAI** | `gpt-4o-mini` for chat agents. `text-embedding-3-small` for Code Navigator. One cached factory in `backend/llm.py` — agents never instantiate their own client. |
 | **LangSmith** | Auto-traces every graph run under project `Prism`. |

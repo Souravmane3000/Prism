@@ -2,6 +2,8 @@
 
 This is the most critical Phase 0 document. Backend implementation must match this graph exactly.
 
+**Phase 4:** The executable verification loop is specified in [`GRAPH_V2.md`](GRAPH_V2.md). Diff Reviewer and HITL #3 are **not** implemented. The V1 diagram below is the planning/HITL front of the pipeline; after HITL #2 the live graph is `code_modifier → validate_patch → apply_patch → test_runner` with the Phase 4 debug loop.
+
 ---
 
 ## 1. Graph Overview

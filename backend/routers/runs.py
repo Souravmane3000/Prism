@@ -40,7 +40,7 @@ from backend.github_client import (
     get_repo,
 )
 from backend.graph import get_compiled_graph
-from backend.state import PrismState
+from backend.state import PrismState, v2_state_defaults
 from backend.supabase_client import (
     create_checkpoint,
     create_run,
@@ -698,6 +698,7 @@ async def start_run(
         "file_contents": {},
         "implementation_plan": [],
         "impl_approved": False,
+        **v2_state_defaults(),  # type: ignore[misc]
         "test_results": None,
         "all_tests_passed": False,
         "debug_report": None,

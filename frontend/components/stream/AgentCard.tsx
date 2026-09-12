@@ -29,8 +29,14 @@ const AGENT_LABELS: Record<AgentName, string> = {
   code_navigator: "Code Navigator",
   impl_planner: "Implementation Planner",
   hitl_2: "HITL Checkpoint 2",
+  code_modifier: "Code Modifier",
+  validate_patch: "Validating patch",
+  apply_patch: "Applying patch",
   test_runner: "Test Runner",
   debugger: "Debugger",
+  fix_patch: "Fix Patch",
+  rollback: "Rollback",
+  max_verification_failure: "Verification failed",
   pr_summarizer: "PR Summarizer",
 };
 
@@ -40,8 +46,14 @@ const AGENT_DESCRIPTIONS: Record<AgentName, string> = {
   code_navigator: "Mapping relevant files via semantic search",
   impl_planner: "Writing step-by-step engineering plan",
   hitl_2: "Awaiting implementation plan approval",
-  test_runner: "Running test suite in isolated sandbox",
-  debugger: "Analyzing failures and proposing fixes",
+  code_modifier: "Generating a structured implementation patch",
+  validate_patch: "Checking patch structure and paths",
+  apply_patch: "Applying the patch in an isolated repository",
+  test_runner: "Running tests against the applied workspace",
+  debugger: "Diagnosing failed verification",
+  fix_patch: "Generating a focused debug fix",
+  rollback: "Restoring the isolated repository to baseline",
+  max_verification_failure: "Stopped after three failed verification attempts",
   pr_summarizer: "Composing professional PR draft",
 };
 

@@ -51,6 +51,10 @@ export interface TestResults {
   exit_code: number;
   stdout: string;
   stderr: string;
+  command?: string;
+  duration_ms?: number;
+  truncated?: boolean;
+  failure_category?: string;
 }
 
 export interface DebugFix {
@@ -64,6 +68,7 @@ export interface DebugFix {
 export interface DebugReport {
   fixes: DebugFix[];
   summary: string;
+  can_generate_fix?: boolean;
 }
 
 export interface PRDraft {
@@ -91,8 +96,14 @@ export type AgentName =
   | "code_navigator"
   | "impl_planner"
   | "hitl_2"
+  | "code_modifier"
+  | "validate_patch"
+  | "apply_patch"
   | "test_runner"
   | "debugger"
+  | "fix_patch"
+  | "rollback"
+  | "max_verification_failure"
   | "pr_summarizer";
 
 export type AgentPhase = "start" | "complete";
@@ -207,6 +218,15 @@ export interface RunRow {
   pr_url: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface SessionEventRow {
+  id: string;
+  run_id: string;
+  sequence: number;
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface AgentOutputRow {

@@ -34,7 +34,9 @@
 │                         LANGGRAPH PIPELINE                                │
 │                                                                           │
 │  Planner → HITL1 → Code Navigator → Impl Planner → HITL2                  │
-│       → Test Runner → (Debugger?) → PR Summarizer → END                   │
+│       → Code Modifier → Validate → Apply → Test Runner                    │
+│       → (Debugger → Fix Patch → Validate → Apply → Test Runner)?          │
+│       → PR Summarizer or rollback / FAILED_MAX_VERIFICATION               │
 │                                                                           │
 │  LLM: OpenAI gpt-4o-mini (OPENAI_API_KEY) + text-embedding-3-small        │
 │  Traces: LangSmith project "Prism"                                        │

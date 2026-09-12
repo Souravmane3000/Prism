@@ -19,8 +19,13 @@ export const PIPELINE_ORDER: AgentName[] = [
   "code_navigator",
   "impl_planner",
   "hitl_2",
+  "code_modifier",
+  "validate_patch",
+  "apply_patch",
   "test_runner",
   "debugger",
+  "fix_patch",
+  "rollback",
   "pr_summarizer",
 ];
 
@@ -28,14 +33,24 @@ const AFTER_HITL_1: AgentName[] = [
   "code_navigator",
   "impl_planner",
   "hitl_2",
+  "code_modifier",
+  "validate_patch",
+  "apply_patch",
   "test_runner",
   "debugger",
+  "fix_patch",
+  "rollback",
   "pr_summarizer",
 ];
 
 const AFTER_HITL_2: AgentName[] = [
+  "code_modifier",
+  "validate_patch",
+  "apply_patch",
   "test_runner",
   "debugger",
+  "fix_patch",
+  "rollback",
   "pr_summarizer",
 ];
 
@@ -147,7 +162,7 @@ export function shouldRenderHitlCard(
     );
   }
   return (
-    !!agentMap.get("impl_planner")?.completeRow && !agentMap.get("test_runner")
+    !!agentMap.get("impl_planner")?.completeRow && !agentMap.get("code_modifier")
   );
 }
 
@@ -192,9 +207,9 @@ export function optimisticNextAgent(
       checkpointPayload,
       runStatus,
     ) &&
-    !agentMap.get("test_runner")
+    !agentMap.get("code_modifier")
   ) {
-    return "test_runner";
+    return "code_modifier";
   }
   return null;
 }

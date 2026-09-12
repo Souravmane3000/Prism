@@ -385,6 +385,40 @@ async def save_agent_output(
         raise
 
 
+async def append_session_event(
+    run_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+) -> None:
+    """Append one ordered session_events row. Never stores secrets."""
+    client = get_supabase()
+    insert_data: dict[str, Any] = {
+        "run_id": run_id,
+        "event_type": event_type,
+        "payload": payload,
+    }
+    try:
+        await _with_sql_fallback(
+            lambda: client.table("session_events").insert(insert_data).execute(),
+            lambda: _sql_execute(
+                """
+                INSERT INTO session_events (run_id, event_type, payload)
+                VALUES (%s, %s, %s)
+                """,
+                (run_id, event_type, Jsonb(payload)),
+            ),
+        )
+    except Exception as exc:
+        logger.error(
+            "Supabase error appending session event run=%s type=%s: %s",
+            run_id,
+            event_type,
+            exc,
+            exc_info=True,
+        )
+        raise
+
+
 # ── hitl_checkpoints table ─────────────────────────────────────────────────────
 # Named hitl_checkpoints (not checkpoints) to avoid collision with LangGraph's
 # own checkpoints table created by AsyncPostgresSaver.setup().

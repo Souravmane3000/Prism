@@ -2,6 +2,8 @@
 
 FastAPI backend deployed on Modal via `@modal.web_endpoint`. All request/response bodies are Pydantic models. GitHub PAT is accepted on endpoints that need it, used in-flight only, and **never** persisted to the database or written to logs.
 
+Phase 4 verification / debugger event payloads are documented in [`API_V2.md`](API_V2.md). No new HTTP routes.
+
 ---
 
 ## 1. Conventions

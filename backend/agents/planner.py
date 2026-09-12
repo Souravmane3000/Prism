@@ -194,6 +194,7 @@ async def planner_node(state: PrismState, config: RunnableConfig) -> dict[str, A
             "repo_tree": file_tree,
             "subtasks": subtasks,
             "issue_text": issue_body,
+            "baseline_sha": repo.get_branch(repo.default_branch).commit.sha,
             "current_agent": "planner",
             "messages": [log_line],
         }

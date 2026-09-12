@@ -16,6 +16,7 @@ from backend.state import (
     Subtask,
     TestFailure,
     TestResults,
+    v2_state_defaults,
 )
 
 
@@ -145,6 +146,16 @@ class TestPrismState:
             "test_results", "all_tests_passed",
             "debug_report", "pr_draft",
             "current_agent", "error", "messages",
+            "verification_attempts", "hitl_revision_count",
+            "baseline_sha", "current_patch", "patch_status", "session_status",
         ]
         for field in required:
             assert field in hints, f"PrismState missing required field: {field}"
+
+    def test_v2_defaults_seed_independent_counters(self):
+        defaults = v2_state_defaults()
+        assert defaults["verification_attempts"] == 0
+        assert defaults["hitl_revision_count"] == 0
+        assert "verification_attempts" in defaults
+        assert "hitl_revision_count" in defaults
+        assert "github_token" not in defaults

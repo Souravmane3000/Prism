@@ -11,7 +11,7 @@ checkpointer never serialises it to PostgreSQL.
 """
 
 import operator
-from typing import Annotated, Optional, TypedDict
+from typing import Annotated, Literal, NotRequired, Optional, TypedDict
 
 
 class Subtask(TypedDict):
@@ -50,7 +50,7 @@ class TestFailure(TypedDict):
 
 
 class TestResults(TypedDict):
-    framework: str            # "pytest" | "unittest" | "jest" | "unknown"
+    framework: str            # "pytest" | "unittest" | "jest" | "unknown" | "skipped"
     passed: list[str]
     failed: list[TestFailure]
     passed_count: int
@@ -58,6 +58,10 @@ class TestResults(TypedDict):
     exit_code: int
     stdout: str
     stderr: str
+    command: NotRequired[str]
+    duration_ms: NotRequired[int]
+    truncated: NotRequired[bool]
+    failure_category: NotRequired[str]
 
 
 class DebugFix(TypedDict):
@@ -71,6 +75,60 @@ class DebugFix(TypedDict):
 class DebugReport(TypedDict):
     fixes: list[DebugFix]
     summary: str
+    can_generate_fix: NotRequired[bool]
+
+
+class PatchFileOperation(TypedDict):
+    path: str
+    operation: Literal["add", "modify", "delete", "rename"]
+    old_path: str | None
+
+
+class StructuredPatch(TypedDict):
+    schema_version: Literal["1"]
+    patch_id: str
+    baseline_sha: str
+    unified_diff: str
+    modified_files: list[PatchFileOperation]
+    checksum_sha256: str
+
+
+class ReviewerFinding(TypedDict):
+    category: Literal["CRITICAL", "WARNING", "SUGGESTION", "TEST_GAP", "SECURITY"]
+    message: str
+    file_path: str
+    line_start: int | None
+    line_end: int | None
+    remediation: str | None
+
+
+PatchStatus = Literal[
+    "GENERATED",
+    "VALIDATED",
+    "REVIEWED",
+    "APPROVED",
+    "APPLIED",
+    "VERIFIED",
+    "REJECTED",
+    "INVALID",
+    "ROLLED_BACK",
+]
+
+PatchOrigin = Literal["code_modifier", "debugger"]
+
+SessionStatus = Literal[
+    "RUNNING",
+    "AWAITING_HITL_1",
+    "AWAITING_HITL_2",
+    "AWAITING_HITL_3",
+    "SUCCESS",
+    "FAILED_MAX_VERIFICATION",
+    "FAILED_MAX_REVISIONS",
+    "USER_TERMINATED",
+    "CONTEXT_OVERFLOW",
+    "LLM_ERROR",
+    "PATCH_ERROR",
+]
 
 
 class PRDraft(TypedDict):
@@ -94,6 +152,7 @@ class PrismState(TypedDict):
     # ── Planner ──────────────────────────────────────────────────────────────
     repo_tree: list[str]
     subtasks: list[Subtask]    # may be edited by hitl_1 on resume
+    baseline_sha: Optional[str]
 
     # ── HITL 1 ───────────────────────────────────────────────────────────────
     planner_approved: bool
@@ -108,6 +167,18 @@ class PrismState(TypedDict):
     # ── HITL 2 ───────────────────────────────────────────────────────────────
     impl_approved: bool
 
+    # ── Code Modifier / patch lifecycle ───────────────────────────────────────
+    current_patch: Optional[StructuredPatch]
+    patch_origin: Optional[PatchOrigin]
+    patch_status: Optional[PatchStatus]
+    modified_files: list[PatchFileOperation]
+    reviewer_findings: list[ReviewerFinding]
+    human_patch_feedback: Optional[str]
+    rejected_diff: Optional[str]
+    hitl_revision_count: int
+    verification_attempts: int
+    final_diff: Optional[str]
+
     # ── Test Runner ───────────────────────────────────────────────────────────
     test_results: Optional[TestResults]
     all_tests_passed: bool
@@ -121,6 +192,25 @@ class PrismState(TypedDict):
     # ── Control / observability ───────────────────────────────────────────────
     current_agent: str
     error: Optional[str]
+    session_status: Optional[SessionStatus]
     # Append-only message log shared across all nodes; operator.add concatenates
     # new list entries without replacing the whole field.
     messages: Annotated[list[str], operator.add]
+
+
+def v2_state_defaults() -> dict[str, object]:
+    """Empty V2 fields seeded at run start. Code Modifier must not invent a baseline."""
+    return {
+        "baseline_sha": None,
+        "current_patch": None,
+        "patch_origin": None,
+        "patch_status": None,
+        "modified_files": [],
+        "reviewer_findings": [],
+        "human_patch_feedback": None,
+        "rejected_diff": None,
+        "hitl_revision_count": 0,
+        "verification_attempts": 0,
+        "final_diff": None,
+        "session_status": None,
+    }

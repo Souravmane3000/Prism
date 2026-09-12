@@ -151,9 +151,10 @@ def api_endpoint():
         # Mock Supabase calls
         with (
             patch("backend.agents.debugger.update_run_status", new=AsyncMock()),
-            patch("backend.agents.debugger.save_agent_output", new=AsyncMock()),
+            patch("backend.agents.debugger.emit_event", new=AsyncMock()),
+            patch("backend.agents.debugger.emit_error_event", new=AsyncMock()),
         ):
-            result = await debugger_node(state)
+            result = await debugger_node(state, {"configurable": {"github_token": ""}})
         
         # Debugger doesn't fail on errors - it produces a partial report
         debug_report = result.get("debug_report", {})

@@ -1,27 +1,31 @@
-"""
-backend/agents/debugger.py — Debugger agent node.
+"""Debugger agent — diagnose verification failures. Does not apply patches."""
 
-Only reached when all_tests_passed is False. For each failing test, the
-Debugger reads the traceback, cross-references the relevant file content
-and implementation plan, identifies the root cause (not just the symptom),
-and proposes a minimal targeted fix with a confidence score.
+from __future__ import annotations
 
-No full rewrites. One targeted change per failure. Does not apply fixes.
-
-Large suites (hundreds of failures) must not block the pipeline: Modal
-run_pipeline times out at 600s, and one LLM call per failure hangs the UI.
-Analyse a small unique sample, then continue to PR Summarizer.
-"""
-
-import asyncio
-import json
 import logging
-import time
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
+from pydantic import BaseModel, Field
 
-from backend.llm import get_llm
+from backend.context_builder import assemble_code_modifier_context
+from backend.events import (
+    DEBUGGER_COMPLETED,
+    DEBUGGER_FAILED,
+    DEBUGGER_STARTED,
+    emit_error_event,
+    emit_event,
+    sanitize_log_text,
+)
+from backend.llm import (
+    ContextOverflowError,
+    DeterministicLLMError,
+    TransientLLMError,
+    invoke_structured,
+)
+from backend.patch.apply import materialize_patch
+from backend.sandbox import open_mutation_workspace
 from backend.state import (
     DebugFix,
     DebugReport,
@@ -31,43 +35,31 @@ from backend.state import (
     TestFailure,
     TestResults,
 )
-from backend.supabase_client import save_agent_output, update_run_status
+from backend.supabase_client import update_run_status
+from backend.verification import MIN_DEBUG_CONFIDENCE
+from backend.workspace import LocalGitWorkspace
 
 logger = logging.getLogger(__name__)
 
-# Hard caps so 456 sequential gpt-4o-mini calls cannot stall past Modal's
-# 600s worker timeout (the UI then looks "stuck" on Debugger forever).
 _MAX_FAILURES_TO_ANALYSE = 5
 _MAX_FALLBACK_FILES = 3
-_DEBUGGER_BUDGET_SECONDS = 90.0
-_LLM_CALL_TIMEOUT_SECONDS = 25.0
 
-_SYSTEM_PROMPT = """You are a senior software engineer performing targeted test failure analysis.
-
-You will be given a failing test's traceback, the relevant source file contents, and the
-engineering plan for the related subtask. Your job is to:
-
-1. Identify the EXACT failing line and variable/expression
-2. Trace backwards to the ROOT CAUSE (not just the surface symptom)
-3. Propose a MINIMAL, TARGETED fix — describe the one change that would fix the failure
-4. Assign a confidence score between 0.0 and 1.0
-
-CRITICAL RULES:
-- Do NOT propose full rewrites or architectural changes
-- One targeted change per failure
-- Describe the fix as a natural-language change description, NOT as code
-- If you cannot determine the root cause with confidence, lower your confidence score
-
-Return ONLY valid JSON matching this schema — no prose, no markdown fences:
-
-{
-  "failing_test": "test_name",
-  "root_cause": "Precise description of what is actually wrong and why",
-  "proposed_fix": "Description of the one minimal change needed to fix it",
-  "confidence": 0.85,
-  "target_files": ["path/to/file.py"]
-}
+_SYSTEM_PROMPT = """You diagnose a single test failure against the CURRENT applied repository.
+Return ONLY JSON:
+{"failing_test":"...","root_cause":"...","proposed_fix":"...","confidence":0.85,"target_files":["path"]}
+Rules:
+- Inspect the provided source; do not guess from failure text alone.
+- Propose the smallest justified change. Natural language, not a full rewrite.
+- If evidence is insufficient, set confidence below 0.7.
 """
+
+
+class DebugFixModel(BaseModel):
+    failing_test: str
+    root_cause: str
+    proposed_fix: str
+    confidence: float = 0.0
+    target_files: list[str] = Field(default_factory=list)
 
 
 def _find_relevant_files(
@@ -75,22 +67,15 @@ def _find_relevant_files(
     file_map: dict[str, list[FileMapEntry]],
     file_contents: dict[str, str],
 ) -> dict[str, str]:
-    """
-    Extract file paths mentioned in the traceback and return their contents.
-    Falls back to all files in file_map if traceback parsing yields nothing.
-    """
     mentioned: set[str] = set()
     for line in traceback_text.splitlines():
-        # Python tracebacks: '  File "path/to/file.py", line N'
         if 'File "' in line:
             start = line.index('File "') + 6
             end = line.index('"', start)
             candidate = line[start:end]
-            # Normalise to relative path
             for known_path in file_contents:
                 if known_path in candidate or candidate.endswith(known_path):
                     mentioned.add(known_path)
-
     if not mentioned:
         ranked: list[tuple[float, str]] = []
         for entries in file_map.values():
@@ -99,7 +84,6 @@ def _find_relevant_files(
         ranked.sort(key=lambda item: item[0], reverse=True)
         for _, path in ranked[:_MAX_FALLBACK_FILES]:
             mentioned.add(path)
-
     return {p: file_contents[p] for p in mentioned if p in file_contents}
 
 
@@ -107,7 +91,6 @@ def _select_failures_to_analyse(
     failed_tests: list[TestFailure],
     limit: int = _MAX_FAILURES_TO_ANALYSE,
 ) -> list[TestFailure]:
-    """Deduplicate similar failures and keep a small sample for LLM analysis."""
     selected: list[TestFailure] = []
     seen: set[str] = set()
     for failure in failed_tests:
@@ -128,8 +111,6 @@ def _find_related_plan(
     implementation_plan: list[ImplementationPlanItem],
     file_map: dict[str, list[FileMapEntry]],
 ) -> str:
-    """Return the plan text most likely related to the failing test."""
-    # Simple heuristic: return the plan for the first subtask that maps to relevant files
     for plan_item in implementation_plan:
         subtask_id = plan_item["subtask_id"]
         if subtask_id in file_map:
@@ -141,211 +122,156 @@ def _find_related_plan(
     return "No related plan available"
 
 
-def _build_debug_prompt(
-    failure: TestFailure,
-    relevant_files: dict[str, str],
-    plan_text: str,
-) -> str:
-    prompt = f"""## Failing Test
+def _load_applied_contents(state: PrismState, token: str) -> dict[str, str]:
+    contents = dict(state.get("file_contents") or {})
+    patch = state.get("current_patch")
+    baseline = state.get("baseline_sha")
+    if not patch or not baseline or not token:
+        return contents
+    workspace: LocalGitWorkspace | None = None
+    try:
+        workspace = open_mutation_workspace(state["repo_url"], token, baseline)
+        materialize_patch(workspace, patch)
+        for path in list(contents.keys()):
+            current = workspace.read_file(path)
+            if current is not None:
+                contents[path] = current
+        for item in patch.get("modified_files") or []:
+            path = item["path"]
+            current = workspace.read_file(path)
+            if current is not None:
+                contents[path] = current
+    except Exception:
+        logger.warning("[debugger] could not inspect applied workspace", exc_info=True)
+    finally:
+        if workspace is not None:
+            workspace.close()
+    return contents
 
-Name: {failure['name']}
 
-Traceback:
-{failure['traceback'] or failure['message'] or 'No traceback available'}
-
-## Related Implementation Plan
-
-{plan_text}
-
-## Relevant Source Files
-"""
-    for path, content in relevant_files.items():
-        truncated = content[:3000] if len(content) > 3000 else content
-        prompt += f"\n### {path}\n\n```\n{truncated}\n```\n"
-
-    prompt += "\nAnalyse the failure and return the debug JSON."
-    return prompt
-
-
-async def debugger_node(state: PrismState) -> dict[str, Any]:
-    """
-    LangGraph node: debugger.
-
-    Only reached when all_tests_passed is False.
-
-    Reads: test_results, file_map, file_contents, implementation_plan, run_id
-    Writes: debug_report, current_agent, messages, error
-    """
+async def debugger_node(state: PrismState, config: RunnableConfig) -> dict[str, Any]:
     run_id: str = state["run_id"]
     logger.info("[debugger] Starting — run_id=%s", run_id)
-
+    token = config.get("configurable", {}).get("github_token", "")
     try:
         await update_run_status(run_id, "running", "debugger")
-        await save_agent_output(run_id, "debugger", {}, "start")
+        await emit_event(run_id, DEBUGGER_STARTED, {"summary": "Debugger diagnosing failure"})
 
         test_results: TestResults | None = state.get("test_results")
         if test_results is None:
             raise ValueError("No test_results in state — debugger cannot run")
 
-        failed_tests: list[TestFailure] = test_results.get("failed", [])
-        file_map: dict[str, list[FileMapEntry]] = state.get("file_map", {})
-        file_contents: dict[str, str] = state.get("file_contents", {})
-        implementation_plan: list[ImplementationPlanItem] = state.get("implementation_plan", [])
+        failed_tests: list[TestFailure] = list(test_results.get("failed") or [])
+        file_map: dict[str, list[FileMapEntry]] = state.get("file_map") or {}
+        file_contents = _load_applied_contents(state, token)
+        implementation_plan: list[ImplementationPlanItem] = state.get("implementation_plan") or []
 
         if not failed_tests:
-            logger.warning("[debugger] No failed tests to analyse")
-            exit_code = int(test_results.get("exit_code", 0) or 0)
-            stderr = str(test_results.get("stderr") or "").strip()
-            if exit_code != 0:
-                detail = stderr[:500] if stderr else "The sandbox exited before any tests were collected."
-                summary = (
-                    f"The repository test suite did not execute (exit code {exit_code}). {detail}"
-                )
-            else:
-                summary = (
-                    "No tests were collected (0 passed, 0 failed). That is not a passing "
-                    "suite, so Debugger ran anyway. Check Test Runner stdout for clone/"
-                    "pytest collection errors."
-                )
-            empty_report = DebugReport(fixes=[], summary=summary)
-            await save_agent_output(
-                run_id, "debugger", {"debug_report": dict(empty_report)}, "complete"
+            summary = "No failed tests to analyse; cannot generate a safe fix."
+            report = DebugReport(fixes=[], summary=summary, can_generate_fix=False)
+            await emit_event(
+                run_id,
+                DEBUGGER_FAILED,
+                {"summary": summary, "reason": "debugger_no_safe_fix"},
             )
+            await update_run_status(run_id, "failed", "debugger", error="debugger_no_safe_fix")
             return {
-                "debug_report": empty_report,
+                "debug_report": report,
+                "session_status": "PATCH_ERROR",
+                "error": "debugger_no_safe_fix",
                 "current_agent": "debugger",
-                "messages": ["[debugger] No failed tests"],
+                "messages": ["[debugger] No safe fix"],
             }
 
-        llm = get_llm(temperature=0.1)
         fixes: list[DebugFix] = []
         to_analyse = _select_failures_to_analyse(failed_tests)
-        deadline = time.monotonic() + _DEBUGGER_BUDGET_SECONDS
-        logger.info(
-            "[debugger] Analysing %d of %d unique-sampled failure(s)",
-            len(to_analyse),
-            len(failed_tests),
-        )
-
         for failure in to_analyse:
-            if time.monotonic() >= deadline:
-                logger.warning(
-                    "[debugger] Time budget exhausted after %d fix(es) — skipping remainder",
-                    len(fixes),
-                )
-                break
-            relevant_files = _find_relevant_files(
-                failure.get("traceback", ""), file_map, file_contents
-            )
+            relevant = _find_relevant_files(failure.get("traceback", ""), file_map, file_contents)
             plan_text = _find_related_plan(failure["name"], implementation_plan, file_map)
-            user_prompt = _build_debug_prompt(failure, relevant_files, plan_text)
-            messages = [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=user_prompt)]
+            header = (
+                f"Failing test: {failure['name']}\n"
+                f"Traceback:\n{sanitize_log_text(failure.get('traceback') or failure.get('message') or '', limit=3000)}\n"
+                f"Plan:\n{plan_text}\n"
+                f"Current diff (truncated):\n{sanitize_log_text(state.get('final_diff') or '', limit=3000)}\n"
+            )
+            assembled = assemble_code_modifier_context(header=header, files=relevant)
+            model = await invoke_structured(
+                [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=assembled.text)],
+                DebugFixModel,
+            )
+            fixes.append(
+                DebugFix(
+                    failing_test=model.failing_test or failure["name"],
+                    root_cause=model.root_cause,
+                    proposed_fix=model.proposed_fix,
+                    confidence=float(model.confidence),
+                    target_files=list(model.target_files),
+                )
+            )
 
-            try:
-                response = await asyncio.wait_for(
-                    llm.ainvoke(messages),
-                    timeout=_LLM_CALL_TIMEOUT_SECONDS,
-                )
-                raw = str(response.content).strip()
-                if raw.startswith("```"):
-                    lines = raw.split("\n")
-                    raw = "\n".join(lines[1:-1]) if lines[-1].strip() == "```" else "\n".join(lines[1:])
-                data = json.loads(raw)
-                fixes.append(
-                    DebugFix(
-                        failing_test=str(data.get("failing_test", failure["name"])),
-                        root_cause=str(data.get("root_cause", "")),
-                        proposed_fix=str(data.get("proposed_fix", "")),
-                        confidence=float(data.get("confidence", 0.5)),
-                        target_files=[str(f) for f in data.get("target_files", [])],
-                    )
-                )
-                logger.info(
-                    "[debugger] Analysed failure '%s' — confidence=%.2f",
-                    failure["name"],
-                    fixes[-1]["confidence"],
-                )
-            except (TimeoutError, asyncio.TimeoutError):
-                logger.error(
-                    "[debugger] LLM timed out for '%s'", failure["name"]
-                )
-                fixes.append(
-                    DebugFix(
-                        failing_test=failure["name"],
-                        root_cause="Debugger LLM call timed out",
-                        proposed_fix="Manual investigation required",
-                        confidence=0.0,
-                        target_files=[],
-                    )
-                )
-            except (json.JSONDecodeError, KeyError, ValueError) as exc:
-                logger.error(
-                    "[debugger] Failed to parse debug output for '%s': %s", failure["name"], exc
-                )
-                fixes.append(
-                    DebugFix(
-                        failing_test=failure["name"],
-                        root_cause=f"Analysis failed: {exc}",
-                        proposed_fix="Manual investigation required",
-                        confidence=0.0,
-                        target_files=[],
-                    )
-                )
-
-        omitted = max(0, len(failed_tests) - len(fixes))
-        high_conf = [f for f in fixes if f["confidence"] >= 0.7]
+        high = [f for f in fixes if f["confidence"] >= MIN_DEBUG_CONFIDENCE and f["target_files"] and f["proposed_fix"]]
+        can_fix = bool(high)
         summary = (
             f"Analysed {len(fixes)} of {len(failed_tests)} failing test(s). "
-            f"{len(high_conf)} fix proposal(s) with confidence ≥ 0.7."
+            f"{len(high)} fix proposal(s) with confidence ≥ {MIN_DEBUG_CONFIDENCE}."
         )
-        if omitted:
-            summary += (
-                f" {omitted} additional failure(s) were not analysed "
-                f"(cap {_MAX_FAILURES_TO_ANALYSE} unique samples)."
+        report = DebugReport(fixes=fixes, summary=summary, can_generate_fix=can_fix)
+        if not can_fix:
+            await emit_event(
+                run_id,
+                DEBUGGER_FAILED,
+                {"summary": summary, "reason": "debugger_no_safe_fix", "fix_count": len(fixes)},
             )
-        debug_report = DebugReport(fixes=fixes, summary=summary)
-
-        output_payload: dict[str, Any] = {"debug_report": dict(debug_report)}
-        await save_agent_output(run_id, "debugger", output_payload, "complete")
-
-        log_line = f"[debugger] {summary}"
-        logger.info(log_line)
-
-        return {
-            "debug_report": debug_report,
-            "current_agent": "debugger",
-            "messages": [log_line],
-        }
-
-    except ValueError as exc:
-        msg = f"[debugger] Failed: {exc}"
-        logger.error(msg, exc_info=True)
-        partial_report = DebugReport(fixes=[], summary=str(exc))
-        await save_agent_output(
+            await update_run_status(run_id, "failed", "debugger", error="debugger_no_safe_fix")
+            return {
+                "debug_report": report,
+                "session_status": "PATCH_ERROR",
+                "error": "debugger_no_safe_fix",
+                "current_agent": "debugger",
+                "messages": [f"[debugger] {summary}"],
+            }
+        await emit_event(
             run_id,
-            "debugger",
-            {"error": str(exc), "debug_report": dict(partial_report)},
-            "complete",
+            DEBUGGER_COMPLETED,
+            {"summary": summary, "fix_count": len(high)},
         )
         return {
-            "debug_report": partial_report,
+            "debug_report": report,
+            "session_status": "RUNNING",
+            "error": None,
+            "current_agent": "debugger",
+            "messages": [f"[debugger] {summary}"],
+        }
+    except ContextOverflowError as exc:
+        await emit_error_event(run_id, "debugger", exc)
+        await emit_event(run_id, DEBUGGER_FAILED, {"summary": str(exc), "reason": "context_overflow"})
+        await update_run_status(run_id, "failed", "debugger", error=str(exc))
+        return {
+            "debug_report": DebugReport(fixes=[], summary=str(exc), can_generate_fix=False),
+            "session_status": "CONTEXT_OVERFLOW",
             "error": str(exc),
             "current_agent": "debugger",
-            "messages": [msg],
+            "messages": [f"[debugger] {exc}"],
+        }
+    except (TransientLLMError, DeterministicLLMError) as exc:
+        await emit_error_event(run_id, "debugger", exc)
+        await emit_event(run_id, DEBUGGER_FAILED, {"summary": str(exc), "reason": "llm_error"})
+        await update_run_status(run_id, "failed", "debugger", error=str(exc))
+        return {
+            "debug_report": DebugReport(fixes=[], summary=str(exc), can_generate_fix=False),
+            "session_status": "LLM_ERROR",
+            "error": str(exc),
+            "current_agent": "debugger",
+            "messages": [f"[debugger] {exc}"],
         }
     except Exception as exc:
-        msg = f"[debugger] Unexpected error: {exc}"
-        logger.error(msg, exc_info=True)
-        partial_report = DebugReport(fixes=[], summary=str(exc))
-        await save_agent_output(
-            run_id,
-            "debugger",
-            {"error": str(exc), "debug_report": dict(partial_report)},
-            "complete",
-        )
+        await emit_error_event(run_id, "debugger", exc)
+        await emit_event(run_id, DEBUGGER_FAILED, {"summary": str(exc)[:500], "reason": "debugger_no_safe_fix"})
+        await update_run_status(run_id, "failed", "debugger", error=str(exc))
         return {
-            "debug_report": partial_report,
+            "debug_report": DebugReport(fixes=[], summary=str(exc), can_generate_fix=False),
+            "session_status": "PATCH_ERROR",
             "error": str(exc),
             "current_agent": "debugger",
-            "messages": [msg],
+            "messages": [f"[debugger] {exc}"],
         }
