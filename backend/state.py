@@ -94,13 +94,30 @@ class StructuredPatch(TypedDict):
 
 
 class ReviewerFinding(TypedDict):
-    category: Literal["CRITICAL", "WARNING", "SUGGESTION", "TEST_GAP", "SECURITY"]
-    message: str
+    severity: Literal["blocking", "major", "minor"]
+    category: Literal[
+        "correctness",
+        "regression",
+        "security",
+        "scope",
+        "tests",
+        "architecture",
+        "api",
+        "other",
+    ]
     file_path: str
     line_start: int | None
     line_end: int | None
-    remediation: str | None
+    description: str
+    why_it_matters: str
+    recommended_action: str
 
+
+ReviewDecision = Literal["APPROVE", "REQUEST_CHANGES"]
+ReviewRiskLevel = Literal["low", "medium", "high"]
+
+# Human-requested revision cycles after HITL #3 REQUEST_CHANGES (not verification).
+MAX_HITL_REVISIONS = 2
 
 PatchStatus = Literal[
     "GENERATED",
@@ -173,6 +190,10 @@ class PrismState(TypedDict):
     patch_status: Optional[PatchStatus]
     modified_files: list[PatchFileOperation]
     reviewer_findings: list[ReviewerFinding]
+    review_decision: Optional[ReviewDecision]
+    review_summary: Optional[str]
+    reviewed_files: list[str]
+    review_risk_level: Optional[ReviewRiskLevel]
     human_patch_feedback: Optional[str]
     rejected_diff: Optional[str]
     hitl_revision_count: int
@@ -207,6 +228,10 @@ def v2_state_defaults() -> dict[str, object]:
         "patch_status": None,
         "modified_files": [],
         "reviewer_findings": [],
+        "review_decision": None,
+        "review_summary": None,
+        "reviewed_files": [],
+        "review_risk_level": None,
         "human_patch_feedback": None,
         "rejected_diff": None,
         "hitl_revision_count": 0,

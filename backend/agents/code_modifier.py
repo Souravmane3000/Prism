@@ -38,7 +38,32 @@ Rules:
 - Prefer replacements of existing text over rewriting whole files.
 - Only change files required by the plan.
 - Do not include secrets or .git paths.
+- When revision context is provided (rejected diff, reviewer findings, human feedback),
+  make a targeted correction: preserve correct parts of the previous patch and fix the
+  identified problems. Do not regenerate blindly.
 """
+
+
+def _build_modifier_header(state: PrismState) -> str:
+    header = (
+        f"Issue:\n{state.get('issue_text') or ''}\n\n"
+        f"Plan:\n{state.get('implementation_plan')!r}\n"
+    )
+    revision = int(state.get("hitl_revision_count") or 0)
+    feedback = state.get("human_patch_feedback")
+    rejected = state.get("rejected_diff")
+    findings = state.get("reviewer_findings") or []
+    if revision > 0 or feedback or rejected or findings:
+        header += (
+            f"\nRevision context:\n"
+            f"- hitl_revision_count: {revision}\n"
+            f"- human_patch_feedback: {feedback!r}\n"
+            f"- reviewer_findings: {findings!r}\n"
+            f"- rejected_diff:\n{rejected or ''}\n"
+            "Produce a corrected ModificationSpec that addresses the feedback and findings "
+            "while preserving correct portions of the previous approach where possible.\n"
+        )
+    return header
 
 
 async def code_modifier_node(state: PrismState, config: RunnableConfig) -> dict[str, Any]:
@@ -46,11 +71,13 @@ async def code_modifier_node(state: PrismState, config: RunnableConfig) -> dict[
     workspace: LocalGitWorkspace | None = None
     try:
         await update_run_status(run_id, "running", "code_modifier")
-        await emit_event(
-            run_id,
-            PATCH_GENERATION_STARTED,
-            {"summary": "Generating implementation patch", "patch_origin": "code_modifier"},
-        )
+        revision = int(state.get("hitl_revision_count") or 0)
+        started_payload: dict[str, Any] = {
+            "summary": "Generating implementation patch",
+            "patch_origin": "code_modifier",
+            "hitl_revision_count": revision,
+        }
+        await emit_event(run_id, PATCH_GENERATION_STARTED, started_payload)
         baseline = state.get("baseline_sha")
         token = config.get("configurable", {}).get("github_token", "")
         if not baseline:
@@ -66,10 +93,7 @@ async def code_modifier_node(state: PrismState, config: RunnableConfig) -> dict[
                         files[path] = content
         if not files:
             files = dict(list((state.get("file_contents") or {}).items())[:8])
-        header = (
-            f"Issue:\n{state.get('issue_text') or ''}\n\n"
-            f"Plan:\n{state.get('implementation_plan')!r}\n"
-        )
+        header = _build_modifier_header(state)
         assembled = assemble_code_modifier_context(header=header, files=files)
         spec = await invoke_structured(
             [SystemMessage(content=_SYSTEM), HumanMessage(content=assembled.text)],
@@ -84,12 +108,19 @@ async def code_modifier_node(state: PrismState, config: RunnableConfig) -> dict[
                 "patch_origin": "code_modifier",
                 "patch_id": patch["patch_id"],
                 "file_count": len(patch["modified_files"]),
+                "hitl_revision_count": revision,
             },
         )
         return {
             "current_patch": patch,
             "patch_origin": "code_modifier",
             "patch_status": "GENERATED",
+            # Fresh candidate must not inherit prior review/approval.
+            "review_decision": None,
+            "review_summary": None,
+            "reviewed_files": [],
+            "review_risk_level": None,
+            "reviewer_findings": [],
             "session_status": "RUNNING",
             "error": None,
             "current_agent": "code_modifier",

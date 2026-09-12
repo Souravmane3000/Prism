@@ -273,8 +273,9 @@ class TestClassifyTestResults:
         hitl = (ROOT / "frontend" / "components" / "stream" / "HITLCard.tsx").read_text(
             encoding="utf-8"
         )
-        assert "Checkpoint 1 of 2" in hitl
-        assert "Checkpoint 2 of 2" in hitl
+        assert "Checkpoint 1 of 3" in hitl
+        assert "Checkpoint 2 of 3" in hitl
+        assert "Checkpoint 3 of 3" in hitl
         assert "break-all" not in hitl
         graph_src = (ROOT / "backend" / "graph.py").read_text(encoding="utf-8")
         assert graph_src.find("backend.config") < graph_src.find("from langgraph")

@@ -20,6 +20,7 @@ from backend.verification import increment_verification_attempts
 
 class LoopState(TypedDict, total=False):
     patch_status: str
+    patch_origin: str
     verification_attempts: int
     all_tests_passed: bool
     test_results: dict[str, Any]
@@ -48,7 +49,11 @@ def _compile_loop(handlers: dict[str, Any]):
         return handlers["fix"](state)
 
     async def validate_node(state: LoopState) -> dict[str, Any]:
-        return {"patch_status": "VALIDATED"}
+        # Verification-loop fixtures model debugger-origin recovery (HITL #3 bypass).
+        return {
+            "patch_status": "VALIDATED",
+            "patch_origin": state.get("patch_origin") or "debugger",
+        }
 
     async def rollback_node(state: LoopState) -> dict[str, Any]:
         return handlers["rollback"](state)
@@ -70,7 +75,9 @@ def _compile_loop(handlers: dict[str, Any]):
 
     builder.add_edge(START, "validate_patch")
     builder.add_conditional_edges(
-        "validate_patch", route_after_validate_patch, {"apply_patch": "apply_patch", "end": END}
+        "validate_patch",
+        route_after_validate_patch,
+        {"apply_patch": "apply_patch", "diff_reviewer": END, "end": END},
     )
     builder.add_conditional_edges(
         "apply_patch", route_after_apply_patch, {"test_runner": "test_runner", "end": END}

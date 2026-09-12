@@ -1,6 +1,6 @@
-# Prism V2 — Graph (Phase 4 executable adapter)
+# Prism V2 — Graph (Phase 5 Diff Reviewer + HITL #3)
 
-Phase 4 implements the verification / self-correction half of the V2 loop as a **staged adapter**. Diff Reviewer, HITL #3, revision cycles, and `SUCCESS` on test PASS are **not** implemented. See [V2-ADR-025](DECISIONS_V2.md).
+Phase 5 inserts an independent Diff Reviewer and HITL #3 approval gate on the **initial** Code Modifier path. Debugger-origin patches permanently bypass review (V2-ADR-008 / V2-ADR-026).
 
 ## Executable graph
 
@@ -13,8 +13,16 @@ flowchart TD
     hitl2 --> modifier[code_modifier]
     modifier -->|"GENERATED"| validatePatch[validate_patch]
     modifier -->|"error"| endFail[END]
-    validatePatch -->|"VALIDATED"| applyPatch[apply_patch]
+    validatePatch -->|"VALIDATED + origin=code_modifier"| reviewer[diff_reviewer]
+    validatePatch -->|"VALIDATED + origin=debugger"| applyPatch[apply_patch]
     validatePatch -->|"INVALID or error"| patchError[PATCH_ERROR]
+    reviewer -->|"REVIEWED"| hitl3[hitl_3]
+    reviewer -->|"LLM / overflow error"| reviewFail[END]
+    hitl3 -->|"APPROVE → APPROVED"| applyPatch
+    hitl3 -->|"REQUEST_CHANGES count less than 2"| modifier
+    hitl3 -->|"REQUEST_CHANGES at limit"| maxRev[max_revisions_failure]
+    hitl3 -->|"STOP"| userStop[USER_TERMINATED]
+    maxRev --> failedRev[FAILED_MAX_REVISIONS]
     applyPatch -->|"APPLIED"| testRunner[test_runner]
     applyPatch -->|"PATCH_ERROR"| applyFail[END]
     testRunner -->|"PASS"| prSummarizer[pr_summarizer]
@@ -30,57 +38,46 @@ flowchart TD
     prSummarizer --> laterSuccess[later PR path]
 ```
 
-`interrupt_before` remains `["hitl_1", "hitl_2"]`. There is no `diff_reviewer` or `hitl_3` node.
+`interrupt_before` is `["hitl_1", "hitl_2", "hitl_3"]`.
 
-`fix_patch` is Debugger recovery, **not** a ninth product agent.
+`fix_patch` remains Debugger recovery, **not** a ninth product agent.
 
-## Verification attempts
+## Patch origins
 
-A verification attempt is **one Test Runner execution** against the current applied workspace.
-
-- `PrismState.verification_attempts` starts at `0`.
-- Test Runner increments **immediately before** execution (`backend/verification.py`).
-- First post-apply run is attempt `1`. Hard max `3`. No fourth run.
-- Debugger, Fix Patch, Apply, and Validate do **not** increment.
-- `hitl_revision_count` is independent and unused by this loop.
-
-## PASS / FAIL
-
-PASS only when at least one test was collected, zero failures, and `exit_code == 0`. `framework="skipped"` is never PASS. The LLM cannot override this.
-
-On PASS: `patch_status=VERIFIED`, `session_status` stays `RUNNING`. The session is **not** marked `SUCCESS` (that remains the later PR path).
-
-## Debug fixes bypass HITL #3
-
-Debug patch lifecycle:
-
-```text
-GENERATED → VALIDATED → APPLIED → (Test Runner PASS) VERIFIED
-```
-
-`REVIEWED` and `APPROVED` are skipped. Apply already accepts `VALIDATED`.
-
-## Cumulative patches
-
-Apply always clones a clean tree at `baseline_sha`. Every `current_patch.unified_diff` is the full `baseline_sha → desired state` diff. Fix Patch uses `generate_cumulative_structured_patch`: materialize the previous patch, apply a focused spec, then `diff` against `baseline_sha`. `baseline_sha` never changes.
-
-## Terminal states (Phase 4)
-
-| Outcome | `session_status` | `patch_status` |
+| Origin | After `VALIDATED` | Apply gate |
 | --- | --- | --- |
-| Tests PASS | `RUNNING` (not `SUCCESS`) | `VERIFIED` |
-| Attempt 3 FAIL + rollback OK | `FAILED_MAX_VERIFICATION` | `ROLLED_BACK` |
-| Attempt 3 FAIL + rollback fail | `PATCH_ERROR` | unchanged / not `FAILED_MAX_VERIFICATION` |
-| Debugger/Fix/overflow/LLM | existing terminals | as today |
+| `code_modifier` | `diff_reviewer` → `hitl_3` | Requires `APPROVED` |
+| `debugger` | `apply_patch` (bypass) | Allows `VALIDATED` |
 
-`rollback` is a Phase 3 primitive and does not write `FAILED_MAX_VERIFICATION`. `max_verification_failure` does that only after verified rollback.
+`REVIEWED` is never applied. Reviewer `APPROVE` only means “ready for human gate”; human APPROVE is mandatory for initial patches.
 
-## Environment vs code failures
+## HITL #3 actions
 
-- Code (`assertion`, `compile`, `import`, `empty_collection`, `unknown`) with attempts `< 3` → Debugger.
-- Attempt 3 code FAIL → Rollback (never Debugger).
-- Environment (`sandbox`, `command_not_found`, `timeout`) → persist `error`, map DB `failed`, END. No Debugger. No `FAILED_MAX_VERIFICATION`.
+| Action | Effect |
+| --- | --- |
+| `approve` | `patch_status=APPROVED` → Apply |
+| `revise` | Requires non-empty `human_feedback` (422 otherwise). Persist `rejected_diff` + feedback; `REJECTED`; increment `hitl_revision_count`; resume Code Modifier if count ≤ 2 |
+| `stop` | `session_status=USER_TERMINATED`; no Apply, no rollback |
+
+Max revisions: `MAX_HITL_REVISIONS = 2`. Exceeding → `FAILED_MAX_REVISIONS` via `max_revisions_failure` (no Code Modifier, no Apply, no rollback).
+
+## Counters (independent)
+
+- `verification_attempts` — Test Runner executions only (Phase 4). Hard max 3.
+- `hitl_revision_count` — HITL #3 REQUEST_CHANGES only (Phase 5). Hard max 2. Starts at 0; increments on revise (`0→1→2`).
+
+## Revision → Code Modifier
+
+When revising, Code Modifier receives `implementation_plan` + repo context + `rejected_diff` + `reviewer_findings` + `human_patch_feedback` + revision number. New patches reset lifecycle to `GENERATED` (cannot inherit `APPROVED` / `REVIEWED`).
+
+## Terminal states (Phase 5 additions)
+
+| Outcome | `session_status` | Notes |
+| --- | --- | --- |
+| HITL #3 STOP | `USER_TERMINATED` | Distinct from max-revision / verification failure |
+| HITL revision limit | `FAILED_MAX_REVISIONS` | After 2 REQUEST_CHANGES cycles |
+| Reviewer LLM / overflow | `LLM_ERROR` / `CONTEXT_OVERFLOW` | Never invents APPROVE; never reaches HITL #3 |
 
 ## Out of scope
 
-Diff Reviewer, HITL #3, REQUEST_CHANGES, USER_TERMINATED, Phase 6 eval, Phase 7 polish.
+Phase 6 eval, Phase 7 polish, SSE/WebSockets redesign, Debugger redesign, reviewer auto-apply.

@@ -34,6 +34,15 @@ DEBUGGER_FAILED: Final = "debugger.analysis.failed"
 ROLLBACK_STARTED: Final = "rollback.started"
 ROLLBACK_COMPLETED: Final = "rollback.completed"
 ROLLBACK_FAILED: Final = "rollback.failed"
+REVIEW_DIFF_STARTED: Final = "review.diff.started"
+REVIEW_DIFF_COMPLETED: Final = "review.diff.completed"
+REVIEW_DIFF_FAILED: Final = "review.diff.failed"
+HITL_REVIEW_PRESENTED: Final = "hitl.review.presented"
+HITL_REVIEW_APPROVED: Final = "hitl.review.approved"
+HITL_REVIEW_CHANGES_REQUESTED: Final = "hitl.review.changes_requested"
+HITL_REVIEW_STOPPED: Final = "hitl.review.stopped"
+REVISION_STARTED: Final = "revision.started"
+REVISION_LIMIT_REACHED: Final = "revision.limit_reached"
 ERROR_OCCURRED: Final = "error.occurred"
 
 _FORBIDDEN_KEYS: Final = frozenset(
@@ -70,6 +79,15 @@ _EVENT_AGENT: dict[str, tuple[str, str]] = {
     ROLLBACK_STARTED: ("rollback", "start"),
     ROLLBACK_COMPLETED: ("rollback", "complete"),
     ROLLBACK_FAILED: ("rollback", "complete"),
+    REVIEW_DIFF_STARTED: ("diff_reviewer", "start"),
+    REVIEW_DIFF_COMPLETED: ("diff_reviewer", "complete"),
+    REVIEW_DIFF_FAILED: ("diff_reviewer", "complete"),
+    HITL_REVIEW_PRESENTED: ("hitl_3", "start"),
+    HITL_REVIEW_APPROVED: ("hitl_3", "complete"),
+    HITL_REVIEW_CHANGES_REQUESTED: ("hitl_3", "complete"),
+    HITL_REVIEW_STOPPED: ("hitl_3", "complete"),
+    REVISION_STARTED: ("code_modifier", "start"),
+    REVISION_LIMIT_REACHED: ("hitl_3", "complete"),
 }
 
 

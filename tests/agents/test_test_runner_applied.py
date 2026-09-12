@@ -30,7 +30,7 @@ def test_pytest_on_applied_workspace_can_fail_then_pass():
         patch = generate_structured_patch(spec, ws, baseline_sha=ws.baseline_sha)
         apply_patch(
             patch=patch,
-            patch_status="VALIDATED",
+            patch_status="APPROVED",
             baseline_sha=ws.baseline_sha,
             workspace=ws,
         )

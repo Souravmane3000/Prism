@@ -39,8 +39,17 @@ from backend.github_client import (
     get_github_client,
     get_repo,
 )
+from backend.events import (
+    HITL_REVIEW_APPROVED,
+    HITL_REVIEW_CHANGES_REQUESTED,
+    HITL_REVIEW_PRESENTED,
+    HITL_REVIEW_STOPPED,
+    REVISION_LIMIT_REACHED,
+    REVISION_STARTED,
+    emit_event,
+)
 from backend.graph import get_compiled_graph
-from backend.state import PrismState, v2_state_defaults
+from backend.state import MAX_HITL_REVISIONS, PrismState, v2_state_defaults
 from backend.supabase_client import (
     create_checkpoint,
     create_run,
@@ -56,7 +65,7 @@ from backend.supabase_client import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 _GRAPH_TRANSIENT_ATTEMPTS = 3
-_HITL_NODES = frozenset({"hitl_1", "hitl_2"})
+_HITL_NODES = frozenset({"hitl_1", "hitl_2", "hitl_3"})
 
 
 def _graph_run_config(run_id: str, github_token: str) -> dict[str, Any]:
@@ -227,19 +236,22 @@ class RunOutputResponse(BaseModel):
 
 
 class ApproveRunRequest(BaseModel):
-    checkpoint: str = Field(..., description="'hitl_1' or 'hitl_2'")
+    checkpoint: str = Field(..., description="'hitl_1', 'hitl_2', or 'hitl_3'")
     action: str = Field(..., description="approve | edit | revise | restart | stop")
     subtasks: Optional[list[Any]] = Field(None, description="Edited subtasks for HITL 1")
     implementation_plan: Optional[list[Any]] = Field(
         None, description="Revised plan for HITL 2"
+    )
+    human_feedback: Optional[str] = Field(
+        None, description="Required non-empty feedback when HITL #3 action is revise"
     )
     github_token: str = Field(..., description="GitHub PAT — re-supplied because it is not stored")
 
     @field_validator("checkpoint")
     @classmethod
     def validate_checkpoint(cls, v: str) -> str:
-        if v not in ("hitl_1", "hitl_2"):
-            raise ValueError("checkpoint must be 'hitl_1' or 'hitl_2'")
+        if v not in ("hitl_1", "hitl_2", "hitl_3"):
+            raise ValueError("checkpoint must be 'hitl_1', 'hitl_2', or 'hitl_3'")
         return v
 
     @field_validator("action")
@@ -249,6 +261,17 @@ class ApproveRunRequest(BaseModel):
         if v not in allowed:
             raise ValueError(f"action must be one of {allowed}")
         return v
+
+    @model_validator(mode="after")
+    def validate_hitl3_revise_feedback(self) -> "ApproveRunRequest":
+        if self.checkpoint == "hitl_3" and self.action == "revise":
+            feedback = (self.human_feedback or "").strip()
+            if not feedback:
+                raise ValueError("human_feedback is required for hitl_3 revise")
+            self.human_feedback = feedback
+        if self.checkpoint == "hitl_3" and self.action in {"edit", "restart"}:
+            raise ValueError("hitl_3 supports approve, revise, and stop only")
+        return self
 
 
 class ApproveRunResponse(BaseModel):
@@ -458,13 +481,35 @@ async def _handle_hitl_pause(
             "subtasks": subtasks,
             "actions_allowed": ["approve", "edit", "restart"],
         }
-    else:  # hitl_2
+    elif checkpoint_name == "hitl_2":
         checkpoint_payload = {
             "checkpoint": "hitl_2",
             "run_id": run_id,
             "type": "implementation_plan_approval",
             "implementation_plan": implementation_plan,
             "actions_allowed": ["approve", "revise", "stop"],
+        }
+    else:  # hitl_3
+        patch = state_values.get("current_patch") or {}
+        checkpoint_payload = {
+            "checkpoint": "hitl_3",
+            "run_id": run_id,
+            "type": "diff_review_approval",
+            "actions_allowed": ["approve", "revise", "stop"],
+            "unified_diff": patch.get("unified_diff"),
+            "modified_files": patch.get("modified_files")
+            or state_values.get("modified_files")
+            or [],
+            "review_decision": state_values.get("review_decision"),
+            "review_summary": state_values.get("review_summary"),
+            "reviewer_findings": state_values.get("reviewer_findings") or [],
+            "reviewed_files": state_values.get("reviewed_files") or [],
+            "review_risk_level": state_values.get("review_risk_level"),
+            "hitl_revision_count": int(state_values.get("hitl_revision_count") or 0),
+            "max_hitl_revisions": MAX_HITL_REVISIONS,
+            "implementation_plan": implementation_plan,
+            "patch_status": state_values.get("patch_status"),
+            "patch_id": patch.get("patch_id"),
         }
 
     # Write checkpoint record and agent-output first so the data is ready
@@ -473,6 +518,17 @@ async def _handle_hitl_pause(
     await create_checkpoint(run_id, checkpoint_name, checkpoint_payload)
     logger.info("[runs] _handle_hitl_pause — calling save_agent_output")
     await save_agent_output(run_id, checkpoint_name, {"status": "awaiting_approval"}, "start")
+    if checkpoint_name == "hitl_3":
+        await emit_event(
+            run_id,
+            HITL_REVIEW_PRESENTED,
+            {
+                "summary": "HITL #3 awaiting human review of reviewed patch",
+                "review_decision": checkpoint_payload.get("review_decision"),
+                "hitl_revision_count": checkpoint_payload.get("hitl_revision_count"),
+                "max_hitl_revisions": MAX_HITL_REVISIONS,
+            },
+        )
     logger.info("[runs] _handle_hitl_pause — calling update_run_status")
     # Status update is the final write; its Realtime event triggers the HITL card.
     # Explicitly clear error to ensure no stale error persists from previous states.
@@ -901,6 +957,27 @@ async def approve_run(
         try:
             await resolve_checkpoint(run_id, body.checkpoint, {"action": body.action})
             await save_agent_output(run_id, body.checkpoint, {"action": body.action}, "complete")
+            terminal_update: dict[str, Any] = {
+                "current_agent": body.checkpoint,
+                "messages": [f"[{body.checkpoint}] action={body.action}"],
+            }
+            if body.checkpoint == "hitl_3" and body.action == "stop":
+                terminal_update["session_status"] = "USER_TERMINATED"
+                await emit_event(
+                    run_id,
+                    HITL_REVIEW_STOPPED,
+                    {
+                        "summary": "Human stopped at HITL #3",
+                        "session_status": "USER_TERMINATED",
+                        "hitl_revision_count": None,
+                    },
+                )
+                graph = await get_compiled_graph()
+                await graph.aupdate_state(
+                    {"configurable": {"thread_id": run_id}},
+                    terminal_update,
+                    as_node="hitl_3",
+                )
             await update_run_status(run_id, "cancelled", body.checkpoint)
         except Exception as exc:
             logger.error("[runs] Failed to cancel run %s: %s", run_id, exc)
@@ -916,15 +993,17 @@ async def approve_run(
             message=msg,
         )
 
-    next_agent = "code_navigator" if body.checkpoint == "hitl_1" else "test_runner"
+    if body.checkpoint == "hitl_1":
+        next_agent = "code_navigator"
+    elif body.checkpoint == "hitl_2":
+        next_agent = "code_modifier"
+    else:
+        next_agent = "apply_patch"
 
     # ── Resolve checkpoint in DB (HITL node code after interrupt() is unreachable) ──
     try:
         await resolve_checkpoint(run_id, body.checkpoint, {"action": body.action})
         await save_agent_output(run_id, body.checkpoint, {"action": body.action}, "complete")
-        # Advance current_agent past the HITL node so the UI does not keep
-        # showing Checkpoint 1 as the active running step.
-        await update_run_status(run_id, "running", next_agent, error="")
     except Exception as exc:
         logger.warning(
             "[runs] Could not resolve checkpoint %s for run %s: %s",
@@ -934,6 +1013,10 @@ async def approve_run(
         )
 
     # ── Build state_update — NO github_token; that travels via config only ─────
+    resume_pipeline = True
+    response_status = "running"
+    response_message = f"Resumed after {body.checkpoint}"
+
     if body.checkpoint == "hitl_1":
         state_update: dict[str, Any] = {
             "planner_approved": True,
@@ -942,7 +1025,7 @@ async def approve_run(
         }
         if body.subtasks is not None:
             state_update["subtasks"] = body.subtasks
-    else:  # hitl_2
+    elif body.checkpoint == "hitl_2":
         state_update = {
             "impl_approved": True,
             "current_agent": "hitl_2",
@@ -950,8 +1033,95 @@ async def approve_run(
         }
         if body.implementation_plan is not None:
             state_update["implementation_plan"] = body.implementation_plan
+    else:  # hitl_3
+        graph = await get_compiled_graph()
+        snapshot = await graph.aget_state({"configurable": {"thread_id": run_id}})
+        values = dict(getattr(snapshot, "values", {}) or {})
+        patch = values.get("current_patch") or {}
+        if values.get("patch_status") != "REVIEWED":
+            raise _error_response(
+                "invalid_patch_state",
+                "HITL #3 approve/revise requires patch_status=REVIEWED",
+                status.HTTP_409_CONFLICT,
+                run_id,
+            )
+        if body.action == "approve":
+            state_update = {
+                "patch_status": "APPROVED",
+                "session_status": "RUNNING",
+                "current_agent": "hitl_3",
+                "messages": ["[hitl_3] Human APPROVED reviewed patch"],
+            }
+            next_agent = "apply_patch"
+            await emit_event(
+                run_id,
+                HITL_REVIEW_APPROVED,
+                {
+                    "summary": "Human approved reviewed patch",
+                    "patch_status": "APPROVED",
+                    "hitl_revision_count": int(values.get("hitl_revision_count") or 0),
+                },
+            )
+        else:  # revise
+            current_count = int(values.get("hitl_revision_count") or 0)
+            new_count = current_count + 1
+            rejected_diff = patch.get("unified_diff")
+            if new_count > MAX_HITL_REVISIONS:
+                state_update = {
+                    "patch_status": "REJECTED",
+                    "rejected_diff": rejected_diff,
+                    "human_patch_feedback": body.human_feedback,
+                    "hitl_revision_count": current_count,
+                    "session_status": "FAILED_MAX_REVISIONS",
+                    "current_agent": "hitl_3",
+                    "messages": ["[hitl_3] REQUEST_CHANGES blocked — FAILED_MAX_REVISIONS"],
+                }
+                next_agent = "max_revisions_failure"
+                response_status = "failed"
+                response_message = "HITL revision limit reached (FAILED_MAX_REVISIONS)"
+                await emit_event(
+                    run_id,
+                    REVISION_LIMIT_REACHED,
+                    {
+                        "summary": "HITL revision limit reached",
+                        "hitl_revision_count": current_count,
+                        "max_hitl_revisions": MAX_HITL_REVISIONS,
+                        "session_status": "FAILED_MAX_REVISIONS",
+                    },
+                )
+            else:
+                state_update = {
+                    "patch_status": "REJECTED",
+                    "rejected_diff": rejected_diff,
+                    "human_patch_feedback": body.human_feedback,
+                    "hitl_revision_count": new_count,
+                    "session_status": "RUNNING",
+                    "current_agent": "hitl_3",
+                    "messages": [
+                        f"[hitl_3] REQUEST_CHANGES — revision {new_count}/{MAX_HITL_REVISIONS}"
+                    ],
+                }
+                next_agent = "code_modifier"
+                await emit_event(
+                    run_id,
+                    HITL_REVIEW_CHANGES_REQUESTED,
+                    {
+                        "summary": "Human requested changes at HITL #3",
+                        "hitl_revision_count": new_count,
+                        "max_hitl_revisions": MAX_HITL_REVISIONS,
+                    },
+                )
+                await emit_event(
+                    run_id,
+                    REVISION_STARTED,
+                    {
+                        "summary": f"Starting HITL revision {new_count}",
+                        "hitl_revision_count": new_count,
+                    },
+                )
 
     try:
+        await update_run_status(run_id, response_status if response_status != "failed" else "failed", next_agent, error="" if response_status != "failed" else "FAILED_MAX_REVISIONS")
         graph = await get_compiled_graph()
         config = {"configurable": {"thread_id": run_id}}
         await graph.aupdate_state(config, state_update, as_node=body.checkpoint)
@@ -964,13 +1134,14 @@ async def approve_run(
             run_id,
         )
     # github_token is passed here so agents after resume can access it via config
-    _schedule_pipeline(run_id, body.github_token, None)
+    if resume_pipeline:
+        _schedule_pipeline(run_id, body.github_token, None)
 
     return ApproveRunResponse(
         run_id=run_id,
-        status="running",
+        status=response_status,
         current_agent=next_agent,
-        message=f"Resumed after {body.checkpoint}",
+        message=response_message,
     )
 
 

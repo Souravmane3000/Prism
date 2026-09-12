@@ -1,10 +1,10 @@
 """
 backend/agents/hitl.py — Human-in-the-Loop checkpoint nodes.
 
-With interrupt_before=["hitl_1", "hitl_2"] set at compile time (graph.py),
+With interrupt_before=["hitl_1", "hitl_2", "hitl_3"] set at compile time (graph.py),
 LangGraph pauses the graph BEFORE these nodes at the normal post-planner /
-post-impl_planner node boundary.  The pause uses LangGraph's reliable
-checkpoint write path — NOT the mid-node interrupt() exception handler.
+post-impl_planner / post-diff_reviewer node boundary.  The pause uses LangGraph's
+reliable checkpoint write path — NOT the mid-node interrupt() exception handler.
 
 Flow:
   1. planner_node completes → LangGraph saves state → astream ends.
@@ -59,4 +59,20 @@ async def hitl_2_node(state: PrismState) -> dict[str, Any]:
         "impl_approved": True,
         "current_agent": "hitl_2",
         "messages": ["[hitl_2] Checkpoint passthrough"],
+    }
+
+
+async def hitl_3_node(state: PrismState) -> dict[str, Any]:
+    """
+    Passthrough node for HITL-3 (diff review gate).
+
+    interrupt_before=["hitl_3"] pauses before this node. approve_run injects the
+    human decision via aupdate_state(as_node="hitl_3") and resumes; this body is
+    normally bypassed.
+    """
+    run_id: str = state["run_id"]
+    logger.info("[hitl_3] Node body reached — run_id=%s (should not occur in normal flow)", run_id)
+    return {
+        "current_agent": "hitl_3",
+        "messages": ["[hitl_3] Checkpoint passthrough"],
     }

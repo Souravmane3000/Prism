@@ -1,9 +1,10 @@
 /**
  * components/stream/HITLCard.tsx — Interactive HITL checkpoint card.
  *
- * Two variants driven by checkpoint prop:
+ * Variants driven by checkpoint prop:
  *   hitl_1: Inline edit of Subtask list → "Approve & Continue"
- *   hitl_2: Inline edit of ImplementationPlan steps → "Approve & Execute Tests"
+ *   hitl_2: Inline edit of ImplementationPlan steps → "Approve & Continue"
+ *   hitl_3: Diff + review findings → Approve / Request Changes / Stop
  *
  * Visual: pulsing lime border via animate-lime-pulse, glassmorphic bg.
  * On approval → calls approveRun() → emits onApproved() so parent can update.
@@ -27,11 +28,16 @@ import {
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { approveRun } from "@/lib/api";
+import { DiffViewer } from "@/components/stream/DiffViewer";
 import type {
   CheckpointName,
   ImplementationPlanItem,
   ImplementationStep,
   Subtask,
+  ReviewerFinding,
+  PatchFileOperation,
+  ReviewDecision,
+  ReviewRiskLevel,
 } from "@/lib/types";
 
 interface HITLCardProps {
@@ -42,6 +48,15 @@ interface HITLCardProps {
   pat: string;
   onApproved: (checkpoint: string) => void;
   onStopped: () => void;
+  unifiedDiff?: string | null;
+  modifiedFiles?: PatchFileOperation[];
+  reviewDecision?: ReviewDecision | string | null;
+  reviewSummary?: string | null;
+  reviewerFindings?: ReviewerFinding[];
+  reviewedFiles?: string[];
+  reviewRiskLevel?: ReviewRiskLevel | string | null;
+  hitlRevisionCount?: number;
+  maxHitlRevisions?: number;
 }
 
 // ── Subtask editor ───────────────────────────────────────────────────────────
@@ -348,6 +363,15 @@ export default function HITLCard({
   pat,
   onApproved,
   onStopped,
+  unifiedDiff = null,
+  modifiedFiles = [],
+  reviewDecision = null,
+  reviewSummary = null,
+  reviewerFindings = [],
+  reviewedFiles = [],
+  reviewRiskLevel = null,
+  hitlRevisionCount = 0,
+  maxHitlRevisions = 2,
 }: HITLCardProps) {
   const [editedSubtasks, setEditedSubtasks] =
     useState<Subtask[]>(initialSubtasks);
@@ -360,6 +384,11 @@ export default function HITLCard({
   const approveInFlightRef = useRef(false);
 
   const isHitl1 = checkpoint === "hitl_1";
+  const isHitl2 = checkpoint === "hitl_2";
+  const isHitl3 = checkpoint === "hitl_3";
+  const [changeFeedback, setChangeFeedback] = useState("");
+  const [activeDiffFile, setActiveDiffFile] = useState<string | null>(null);
+  const [showRequestChanges, setShowRequestChanges] = useState(false);
 
   useEffect(() => {
     if (initialSubtasks.length === 0) return;
@@ -387,13 +416,47 @@ export default function HITLCard({
         checkpoint,
         action: "approve",
         subtasks: isHitl1 ? editedSubtasks : null,
-        implementation_plan: !isHitl1 ? editedPlan : null,
+        implementation_plan: isHitl2 ? editedPlan : null,
+        human_feedback: null,
         github_token: pat,
       });
       setSubmitted(true);
       onApproved(checkpoint);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to approve");
+    } finally {
+      setLoading(false);
+      approveInFlightRef.current = false;
+    }
+  }
+
+  async function handleRequestChanges() {
+    if (approveInFlightRef.current || loading || submitted) return;
+    if (!pat) {
+      setError("GitHub PAT is required. Re-enter it in the form.");
+      return;
+    }
+    const feedback = changeFeedback.trim();
+    if (!feedback) {
+      setError("Feedback is required when requesting changes.");
+      return;
+    }
+    approveInFlightRef.current = true;
+    setError(null);
+    setLoading(true);
+    try {
+      await approveRun(runId, {
+        checkpoint,
+        action: "revise",
+        subtasks: null,
+        implementation_plan: null,
+        human_feedback: feedback,
+        github_token: pat,
+      });
+      setSubmitted(true);
+      onApproved(checkpoint);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to request changes");
     } finally {
       setLoading(false);
       approveInFlightRef.current = false;
@@ -410,6 +473,7 @@ export default function HITLCard({
         action: "stop",
         subtasks: null,
         implementation_plan: null,
+        human_feedback: null,
         github_token: pat,
       });
       setSubmitted(true);
@@ -445,15 +509,19 @@ export default function HITLCard({
           style={{ color: "var(--accent-lime)" }}
         >
           {isHitl1
-            ? "Checkpoint 1 of 2 — Subtask Review"
-            : "Checkpoint 2 of 2 — Implementation Plan"}
+            ? "Checkpoint 1 of 3 — Subtask Review"
+            : isHitl2
+              ? "Checkpoint 2 of 3 — Implementation Plan"
+              : "Checkpoint 3 of 3 — Diff Review"}
         </span>
       </div>
 
       <p className="text-xs mb-4" style={{ color: "var(--text-secondary)" }}>
         {isHitl1
-          ? "First review gate: edit the subtask list, then approve to start file mapping. A second review happens after the implementation plan."
-          : "Second review gate: this is the file-level plan, not the subtask list. Approve to run the target repository's tests."}
+          ? "First review gate: edit the subtask list, then approve to continue. Two more gates follow."
+          : isHitl2
+            ? "Second review gate: file-level plan. Approve to generate an implementation patch for independent review."
+            : "Final safety gate: inspect the reviewed diff and findings. Approve applies the patch; Request Changes revises it; Stop ends without apply or rollback."}
       </p>
 
       {isHitl1 && editedSubtasks.length === 0 && (
@@ -462,15 +530,115 @@ export default function HITLCard({
         </p>
       )}
 
-      {/* Editor */}
-      <div className="mb-4 max-h-80 overflow-y-auto">
+      {/* Editor / review body */}
+      <div className="mb-4 max-h-[28rem] overflow-y-auto">
         {isHitl1 ? (
           <SubtaskEditor
             subtasks={editedSubtasks}
             onChange={setEditedSubtasks}
           />
-        ) : (
+        ) : isHitl2 ? (
           <PlanEditor plan={editedPlan} onChange={setEditedPlan} />
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span
+                className="rounded px-2 py-0.5 font-semibold"
+                style={{
+                  backgroundColor:
+                    reviewDecision === "APPROVE"
+                      ? "rgba(163,230,53,0.15)"
+                      : "rgba(251,191,36,0.15)",
+                  color:
+                    reviewDecision === "APPROVE"
+                      ? "var(--accent-lime)"
+                      : "#fbbf24",
+                }}
+              >
+                Reviewer: {reviewDecision ?? "UNKNOWN"}
+              </span>
+              {reviewRiskLevel ? (
+                <span style={{ color: "var(--text-dim)" }}>
+                  Risk: {reviewRiskLevel}
+                </span>
+              ) : null}
+              <span style={{ color: "var(--text-dim)" }}>
+                Revision {hitlRevisionCount} / {maxHitlRevisions}
+              </span>
+            </div>
+            {reviewSummary ? (
+              <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                {reviewSummary}
+              </p>
+            ) : null}
+            {reviewerFindings.length > 0 ? (
+              <ul className="space-y-2">
+                {reviewerFindings.map((f, i) => (
+                  <li
+                    key={`${f.file_path}-${i}`}
+                    className="rounded-lg p-2 text-xs"
+                    style={{
+                      border: "1px solid var(--border-dim)",
+                      backgroundColor: "rgba(10,13,8,0.4)",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="font-mono text-[11px] underline"
+                      style={{ color: "var(--accent-lime)" }}
+                      onClick={() => setActiveDiffFile(f.file_path)}
+                    >
+                      {f.file_path}
+                    </button>
+                    <div className="mt-1">
+                      <span className="font-semibold uppercase">{f.severity}</span>
+                      {" · "}
+                      {f.category}
+                    </div>
+                    <p className="mt-1" style={{ color: "var(--text-secondary)" }}>
+                      {f.description}
+                    </p>
+                    <p className="mt-1" style={{ color: "var(--text-dim)" }}>
+                      Why it matters: {f.why_it_matters}
+                    </p>
+                    <p className="mt-1" style={{ color: "var(--text-dim)" }}>
+                      Recommended: {f.recommended_action}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs" style={{ color: "var(--text-dim)" }}>
+                No structured findings from the Diff Reviewer.
+              </p>
+            )}
+            <DiffViewer
+              unifiedDiff={unifiedDiff}
+              modifiedFiles={modifiedFiles}
+              findings={reviewerFindings}
+              activeFile={activeDiffFile}
+              onActiveFileChange={setActiveDiffFile}
+            />
+            {showRequestChanges ? (
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
+                  Required feedback for revision
+                </label>
+                <TextareaAutosize
+                  minRows={3}
+                  value={changeFeedback}
+                  onChange={(e) => setChangeFeedback(e.target.value)}
+                  placeholder="Describe what must change in the next patch…"
+                  className="w-full rounded-lg px-3 py-2 text-xs"
+                  style={{
+                    backgroundColor: "rgba(10,13,8,0.6)",
+                    border: "1px solid var(--border-dim)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
         )}
       </div>
 
@@ -495,11 +663,11 @@ export default function HITLCard({
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="primary"
           size="sm"
-          loading={loading}
+          loading={loading && !showRequestChanges}
           disabled={
             loading ||
             submitted ||
@@ -510,8 +678,30 @@ export default function HITLCard({
           className="flex-1"
         >
           <CheckCheck size={13} />
-          {isHitl1 ? "Approve & Continue" : "Approve & Execute Tests"}
+          {isHitl1
+            ? "Approve & Continue"
+            : isHitl2
+              ? "Approve & Generate Patch"
+              : "Approve & Apply Patch"}
         </Button>
+        {isHitl3 ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={loading && showRequestChanges}
+            disabled={loading || submitted || !pat}
+            onClick={() => {
+              if (!showRequestChanges) {
+                setShowRequestChanges(true);
+                return;
+              }
+              void handleRequestChanges();
+            }}
+          >
+            <Pencil size={13} />
+            {showRequestChanges ? "Submit Changes" : "Request Changes"}
+          </Button>
+        ) : null}
         <Button
           variant="danger"
           size="sm"

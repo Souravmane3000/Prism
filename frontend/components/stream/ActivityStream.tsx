@@ -194,6 +194,26 @@ export default function ActivityStream({
     seenAgents.add("hitl_2");
   }
 
+  if (
+    shouldRenderHitlCard(
+      "hitl_3",
+      runStatus,
+      checkpointPayload,
+      resolvedCheckpoints,
+      agentMap,
+    ) ||
+    isHitlResolved(
+      "hitl_3",
+      resolvedCheckpoints,
+      agentMap,
+      checkpointPayload,
+      runStatus,
+    ) ||
+    agentMap.get("diff_reviewer")?.completeRow
+  ) {
+    seenAgents.add("hitl_3");
+  }
+
   const debuggerSkipped = isDebuggerSkippedInStream(agentMap, runStatus);
   if (debuggerSkipped) {
     seenAgents.add("debugger");
@@ -287,16 +307,45 @@ export default function ActivityStream({
               [];
             const implPlan = rawPlan as ImplementationPlanItem[];
 
+            const hitl3Props =
+              agent === "hitl_3"
+                ? {
+                    unifiedDiff:
+                      (cpPayload.unified_diff as string | null | undefined) ??
+                      null,
+                    modifiedFiles:
+                      (cpPayload.modified_files as any[]) ?? [],
+                    reviewDecision:
+                      (cpPayload.review_decision as string | null | undefined) ??
+                      null,
+                    reviewSummary:
+                      (cpPayload.review_summary as string | null | undefined) ??
+                      null,
+                    reviewerFindings:
+                      (cpPayload.reviewer_findings as any[]) ?? [],
+                    reviewedFiles:
+                      (cpPayload.reviewed_files as string[] | undefined) ?? [],
+                    reviewRiskLevel:
+                      (cpPayload.review_risk_level as
+                        | string
+                        | null
+                        | undefined) ?? null,
+                    hitlRevisionCount: Number(cpPayload.hitl_revision_count ?? 0),
+                    maxHitlRevisions: Number(cpPayload.max_hitl_revisions ?? 2),
+                  }
+                : {};
+
             return (
               <HITLCard
                 key={agent}
                 runId={runId}
-                checkpoint={agent as "hitl_1" | "hitl_2"}
+                checkpoint={agent as "hitl_1" | "hitl_2" | "hitl_3"}
                 subtasks={subtasks}
                 implementationPlan={implPlan}
                 pat={pat}
                 onApproved={onApproved}
                 onStopped={onStopped}
+                {...hitl3Props}
               />
             );
           }

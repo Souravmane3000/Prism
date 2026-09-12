@@ -29,7 +29,7 @@ class TestGenerateApplyRollback:
             assert result.ok
             applied = apply_patch(
                 patch=patch,
-                patch_status="VALIDATED",
+                patch_status="APPROVED",
                 baseline_sha=ws.baseline_sha,
                 workspace=ws,
             )
@@ -95,7 +95,7 @@ class TestGenerateApplyRollback:
             ws.reset_to_baseline()
             apply_patch(
                 patch=patch,
-                patch_status="VALIDATED",
+                patch_status="APPROVED",
                 baseline_sha=ws.baseline_sha,
                 workspace=ws,
             )

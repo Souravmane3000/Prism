@@ -1,4 +1,4 @@
-"""LangGraph apply_patch service node. Does not enable HITL #3."""
+"""LangGraph apply_patch service node. Initial path requires HITL #3 APPROVED."""
 
 from __future__ import annotations
 
@@ -60,6 +60,7 @@ async def apply_patch_node(state: PrismState, config: RunnableConfig) -> dict[st
             patch_status=incoming_status,
             baseline_sha=baseline_sha,
             workspace=workspace,
+            patch_origin=state.get("patch_origin"),
         )
         await emit_event(
             run_id,

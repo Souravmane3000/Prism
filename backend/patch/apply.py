@@ -22,6 +22,8 @@ from backend.workspace import LocalGitWorkspace, WorkspaceError
 
 logger = logging.getLogger(__name__)
 
+# APPROVED: human-approved initial patch (Phase 5).
+# VALIDATED: debugger-origin recovery patches only (Phase 4 bypass).
 APPLY_ALLOWED_STATUSES = frozenset({"VALIDATED", "APPROVED"})
 DUPLICATE_APPLY_STATUS = "APPLIED"
 _BLOCKED_STATUSES = frozenset(
@@ -70,10 +72,25 @@ def check_apply_preconditions(
     patch_status: str | None,
     baseline_sha: str | None,
     workspace: LocalGitWorkspace | None = None,
+    patch_origin: str | None = None,
 ) -> StructuredPatch:
     if patch_status == DUPLICATE_APPLY_STATUS:
         raise ApplyError("Patch is already APPLIED", reason="duplicate_apply")
-    if patch_status in _BLOCKED_STATUSES or patch_status not in APPLY_ALLOWED_STATUSES:
+    if patch_status == "APPROVED":
+        pass
+    elif patch_status == "VALIDATED":
+        # Phase 4/5 lock: only debugger-origin patches may apply at VALIDATED.
+        if patch_origin != "debugger":
+            raise ApplyError(
+                "VALIDATED code_modifier patches require Diff Reviewer + HITL #3 APPROVED",
+                reason="invalid_lifecycle",
+            )
+    elif patch_status in _BLOCKED_STATUSES or patch_status not in APPLY_ALLOWED_STATUSES:
+        raise ApplyError(
+            f"Patch status {patch_status!r} cannot be applied",
+            reason="invalid_lifecycle",
+        )
+    else:
         raise ApplyError(
             f"Patch status {patch_status!r} cannot be applied",
             reason="invalid_lifecycle",
@@ -119,12 +136,14 @@ def apply_patch(
     patch_status: str | None,
     baseline_sha: str | None,
     workspace: LocalGitWorkspace,
+    patch_origin: str | None = None,
 ) -> ApplyResult:
     checked = check_apply_preconditions(
         patch=patch,
         patch_status=patch_status,
         baseline_sha=baseline_sha,
         workspace=workspace,
+        patch_origin=patch_origin,
     )
     expected = require_baseline_sha(baseline_sha)
     try:

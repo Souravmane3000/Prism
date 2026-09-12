@@ -98,17 +98,20 @@ export type AgentName =
   | "hitl_2"
   | "code_modifier"
   | "validate_patch"
+  | "diff_reviewer"
+  | "hitl_3"
   | "apply_patch"
   | "test_runner"
   | "debugger"
   | "fix_patch"
   | "rollback"
   | "max_verification_failure"
+  | "max_revisions_failure"
   | "pr_summarizer";
 
 export type AgentPhase = "start" | "complete";
 
-export type CheckpointName = "hitl_1" | "hitl_2";
+export type CheckpointName = "hitl_1" | "hitl_2" | "hitl_3";
 
 export type ApproveAction =
   | "approve"
@@ -116,6 +119,35 @@ export type ApproveAction =
   | "revise"
   | "restart"
   | "stop";
+
+export type ReviewDecision = "APPROVE" | "REQUEST_CHANGES";
+
+export type ReviewRiskLevel = "low" | "medium" | "high";
+
+export interface ReviewerFinding {
+  severity: "blocking" | "major" | "minor";
+  category:
+    | "correctness"
+    | "regression"
+    | "security"
+    | "scope"
+    | "tests"
+    | "architecture"
+    | "api"
+    | "other";
+  file_path: string;
+  line_start: number | null;
+  line_end: number | null;
+  description: string;
+  why_it_matters: string;
+  recommended_action: string;
+}
+
+export interface PatchFileOperation {
+  path: string;
+  operation: "add" | "modify" | "delete" | "rename";
+  old_path: string | null;
+}
 
 // ── API request types ────────────────────────────────────────────────────────
 
@@ -131,6 +163,7 @@ export interface ApproveRunRequest {
   action: ApproveAction;
   subtasks: Subtask[] | null;
   implementation_plan: ImplementationPlanItem[] | null;
+  human_feedback?: string | null;
   github_token: string;
 }
 
@@ -293,4 +326,23 @@ export interface Hitl2Payload {
   type: "implementation_plan_approval";
   implementation_plan: ImplementationPlanItem[];
   actions_allowed: string[];
+}
+
+export interface Hitl3Payload {
+  checkpoint: "hitl_3";
+  run_id: string;
+  type: "diff_review_approval";
+  actions_allowed: string[];
+  unified_diff: string | null;
+  modified_files: PatchFileOperation[];
+  review_decision: ReviewDecision | null;
+  review_summary: string | null;
+  reviewer_findings: ReviewerFinding[];
+  reviewed_files: string[];
+  review_risk_level: ReviewRiskLevel | null;
+  hitl_revision_count: number;
+  max_hitl_revisions: number;
+  implementation_plan: ImplementationPlanItem[];
+  patch_status: string | null;
+  patch_id: string | null;
 }

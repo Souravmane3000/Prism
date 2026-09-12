@@ -40,7 +40,8 @@ async def test_apply_patch_node_does_not_write_baseline_or_attempts():
                     "repo_url": "https://github.com/x/y",
                     "baseline_sha": ws.baseline_sha,
                     "current_patch": structured,
-                    "patch_status": "VALIDATED",
+                    "patch_status": "APPROVED",
+                    "patch_origin": "code_modifier",
                 },
                 {"configurable": {"github_token": "t"}},
             )

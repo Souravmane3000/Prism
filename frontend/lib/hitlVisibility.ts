@@ -21,6 +21,8 @@ export const PIPELINE_ORDER: AgentName[] = [
   "hitl_2",
   "code_modifier",
   "validate_patch",
+  "diff_reviewer",
+  "hitl_3",
   "apply_patch",
   "test_runner",
   "debugger",
@@ -35,6 +37,8 @@ const AFTER_HITL_1: AgentName[] = [
   "hitl_2",
   "code_modifier",
   "validate_patch",
+  "diff_reviewer",
+  "hitl_3",
   "apply_patch",
   "test_runner",
   "debugger",
@@ -46,6 +50,17 @@ const AFTER_HITL_1: AgentName[] = [
 const AFTER_HITL_2: AgentName[] = [
   "code_modifier",
   "validate_patch",
+  "diff_reviewer",
+  "hitl_3",
+  "apply_patch",
+  "test_runner",
+  "debugger",
+  "fix_patch",
+  "rollback",
+  "pr_summarizer",
+];
+
+const AFTER_HITL_3: AgentName[] = [
   "apply_patch",
   "test_runner",
   "debugger",
@@ -58,6 +73,8 @@ export type AgentMap = Map<
   AgentName,
   { startRow?: AgentOutputRow; completeRow?: AgentOutputRow }
 >;
+
+export type HitlCheckpoint = "hitl_1" | "hitl_2" | "hitl_3";
 
 export function isTerminalRunStatus(
   status: RunRow["status"] | undefined,
@@ -90,11 +107,16 @@ export function firstLaterCompleteAt(
 }
 
 export function laterAgentsStarted(
-  agent: "hitl_1" | "hitl_2",
+  agent: HitlCheckpoint,
   agentMap: AgentMap,
   currentAgent: string | null | undefined,
 ): boolean {
-  const later = agent === "hitl_1" ? AFTER_HITL_1 : AFTER_HITL_2;
+  const later =
+    agent === "hitl_1"
+      ? AFTER_HITL_1
+      : agent === "hitl_2"
+        ? AFTER_HITL_2
+        : AFTER_HITL_3;
   if (currentAgent && later.includes(currentAgent as AgentName)) return true;
   return later.some((name) => agentMap.has(name));
 }
@@ -106,7 +128,9 @@ export function isHitlResolved(
   checkpointPayload: CheckpointRow | null,
   runStatus: RunRow | null,
 ): boolean {
-  if (agent !== "hitl_1" && agent !== "hitl_2") return false;
+  if (agent !== "hitl_1" && agent !== "hitl_2" && agent !== "hitl_3") {
+    return false;
+  }
   if (resolvedCheckpoints.has(agent)) return true;
   if (agentMap.get(agent)?.completeRow) return true;
   if (
@@ -115,7 +139,11 @@ export function isHitlResolved(
   ) {
     return true;
   }
-  return laterAgentsStarted(agent, agentMap, runStatus?.current_agent);
+  return laterAgentsStarted(
+    agent,
+    agentMap,
+    runStatus?.current_agent,
+  );
 }
 
 export function shouldRenderHitlCard(
@@ -125,7 +153,9 @@ export function shouldRenderHitlCard(
   resolvedCheckpoints: ReadonlySet<string>,
   agentMap: AgentMap,
 ): boolean {
-  if (agent !== "hitl_1" && agent !== "hitl_2") return false;
+  if (agent !== "hitl_1" && agent !== "hitl_2" && agent !== "hitl_3") {
+    return false;
+  }
   if (isTerminalRunStatus(runStatus?.status)) return false;
   if (
     isHitlResolved(
@@ -154,15 +184,20 @@ export function shouldRenderHitlCard(
     return true;
   }
 
-  // Heuristic only while still paused — never after the pipeline has moved on.
   if (runStatus?.status !== "awaiting_approval") return false;
   if (agent === "hitl_1") {
     return (
       !!agentMap.get("planner")?.completeRow && !agentMap.get("code_navigator")
     );
   }
+  if (agent === "hitl_2") {
+    return (
+      !!agentMap.get("impl_planner")?.completeRow &&
+      !agentMap.get("code_modifier")
+    );
+  }
   return (
-    !!agentMap.get("impl_planner")?.completeRow && !agentMap.get("code_modifier")
+    !!agentMap.get("diff_reviewer")?.completeRow && !agentMap.get("apply_patch")
   );
 }
 
@@ -210,6 +245,18 @@ export function optimisticNextAgent(
     !agentMap.get("code_modifier")
   ) {
     return "code_modifier";
+  }
+  if (
+    isHitlResolved(
+      "hitl_3",
+      resolvedCheckpoints,
+      agentMap,
+      checkpointPayload,
+      runStatus,
+    ) &&
+    !agentMap.get("apply_patch")
+  ) {
+    return "apply_patch";
   }
   return null;
 }

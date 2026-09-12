@@ -58,11 +58,26 @@ class TestRouteAfterTests:
 
 
 class TestRouteAfterValidateAndApply:
-    def test_validated_goes_to_apply_not_test_runner(self):
+    def test_validated_code_modifier_goes_to_diff_reviewer(self):
         from backend.graph import route_after_validate_patch
 
-        assert route_after_validate_patch({"patch_status": "VALIDATED"}) == "apply_patch"
+        assert (
+            route_after_validate_patch(
+                {"patch_status": "VALIDATED", "patch_origin": "code_modifier"}
+            )
+            == "diff_reviewer"
+        )
         assert route_after_validate_patch({"patch_status": "INVALID"}) == "end"
+
+    def test_validated_debugger_bypasses_review(self):
+        from backend.graph import route_after_validate_patch
+
+        assert (
+            route_after_validate_patch(
+                {"patch_status": "VALIDATED", "patch_origin": "debugger"}
+            )
+            == "apply_patch"
+        )
 
     def test_applied_goes_to_test_runner(self):
         from backend.graph import route_after_apply_patch
@@ -105,7 +120,7 @@ class TestDebugFixLoop:
 
 
 class TestBuildGraph:
-    def test_registers_phase4_nodes_without_hitl3(self):
+    def test_registers_phase5_nodes_including_hitl3(self):
         from backend.graph import build_graph
 
         builder = build_graph()
@@ -117,6 +132,9 @@ class TestBuildGraph:
             "hitl_2",
             "code_modifier",
             "validate_patch",
+            "diff_reviewer",
+            "hitl_3",
+            "max_revisions_failure",
             "apply_patch",
             "test_runner",
             "debugger",
@@ -128,8 +146,6 @@ class TestBuildGraph:
         if hasattr(builder, "_nodes"):
             registered = set(builder._nodes.keys()) - {"__start__", "__end__"}
             assert registered == expected
-            assert "diff_reviewer" not in registered
-            assert "hitl_3" not in registered
 
     def test_build_graph_returns_stategraph_instance(self):
         from langgraph.graph import StateGraph
@@ -177,5 +193,4 @@ class TestGetCompiledGraph:
 
         source = inspect.getsource(graph_module.get_compiled_graph)
         compact = source.replace(" ", "")
-        assert 'interrupt_before=["hitl_1","hitl_2"]' in compact
-        assert "hitl_3" not in compact
+        assert 'interrupt_before=["hitl_1","hitl_2","hitl_3"]' in compact

@@ -31,12 +31,15 @@ const AGENT_LABELS: Record<AgentName, string> = {
   hitl_2: "HITL Checkpoint 2",
   code_modifier: "Code Modifier",
   validate_patch: "Validating patch",
+  diff_reviewer: "Diff Reviewer",
+  hitl_3: "HITL Checkpoint 3",
   apply_patch: "Applying patch",
   test_runner: "Test Runner",
   debugger: "Debugger",
   fix_patch: "Fix Patch",
   rollback: "Rollback",
   max_verification_failure: "Verification failed",
+  max_revisions_failure: "Revision limit reached",
   pr_summarizer: "PR Summarizer",
 };
 
@@ -48,12 +51,15 @@ const AGENT_DESCRIPTIONS: Record<AgentName, string> = {
   hitl_2: "Awaiting implementation plan approval",
   code_modifier: "Generating a structured implementation patch",
   validate_patch: "Checking patch structure and paths",
+  diff_reviewer: "Independently reviewing the proposed diff",
+  hitl_3: "Awaiting human approval of the reviewed patch",
   apply_patch: "Applying the patch in an isolated repository",
   test_runner: "Running tests against the applied workspace",
   debugger: "Diagnosing failed verification",
   fix_patch: "Generating a focused debug fix",
   rollback: "Restoring the isolated repository to baseline",
   max_verification_failure: "Stopped after three failed verification attempts",
+  max_revisions_failure: "Stopped after two HITL revision cycles",
   pr_summarizer: "Composing professional PR draft",
 };
 

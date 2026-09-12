@@ -1,4 +1,4 @@
-"""LangGraph StateGraph assembly — Phase 4 verification loop adapter."""
+"""LangGraph StateGraph assembly — Phase 5 Diff Reviewer + HITL #3."""
 
 import logging
 
@@ -14,16 +14,18 @@ from backend.agents.apply_patch import apply_patch_node
 from backend.agents.code_modifier import code_modifier_node
 from backend.agents.code_navigator import code_navigator_node
 from backend.agents.debugger import debugger_node
+from backend.agents.diff_reviewer import diff_reviewer_node
 from backend.agents.fix_patch import fix_patch_node
-from backend.agents.hitl import hitl_1_node, hitl_2_node
+from backend.agents.hitl import hitl_1_node, hitl_2_node, hitl_3_node
 from backend.agents.implementation_planner import implementation_planner_node
+from backend.agents.max_revisions_failure import max_revisions_failure_node
 from backend.agents.max_verification_failure import max_verification_failure_node
 from backend.agents.planner import planner_node
 from backend.agents.pr_summarizer import pr_summarizer_node
 from backend.agents.rollback import rollback_node
 from backend.agents.test_runner import test_runner_node
 from backend.agents.validate_patch import validate_patch_node
-from backend.state import PrismState
+from backend.state import MAX_HITL_REVISIONS, PrismState
 from backend.verification import route_after_verification
 
 logger = logging.getLogger(__name__)
@@ -39,8 +41,36 @@ def route_after_code_modifier(state: PrismState) -> str:
 
 
 def route_after_validate_patch(state: PrismState) -> str:
-    if state.get("patch_status") == "VALIDATED":
+    if state.get("patch_status") != "VALIDATED":
+        return "end"
+    # Debugger-origin patches permanently bypass Diff Reviewer / HITL #3.
+    if state.get("patch_origin") == "debugger":
         return "apply_patch"
+    return "diff_reviewer"
+
+
+def route_after_diff_reviewer(state: PrismState) -> str:
+    status = state.get("session_status")
+    if status in {"CONTEXT_OVERFLOW", "LLM_ERROR", "PATCH_ERROR"}:
+        return "end"
+    if state.get("patch_status") == "REVIEWED":
+        return "hitl_3"
+    return "end"
+
+
+def route_after_hitl_3(state: PrismState) -> str:
+    status = state.get("session_status")
+    if status == "USER_TERMINATED":
+        return "end"
+    if status == "FAILED_MAX_REVISIONS":
+        return "max_revisions_failure"
+    if state.get("patch_status") == "APPROVED":
+        return "apply_patch"
+    if state.get("patch_status") == "REJECTED":
+        count = int(state.get("hitl_revision_count") or 0)
+        if count > MAX_HITL_REVISIONS:
+            return "max_revisions_failure"
+        return "code_modifier"
     return "end"
 
 
@@ -99,12 +129,15 @@ def build_graph() -> StateGraph:
     builder.add_node("hitl_2", hitl_2_node)
     builder.add_node("code_modifier", code_modifier_node)
     builder.add_node("validate_patch", validate_patch_node)
+    builder.add_node("diff_reviewer", diff_reviewer_node)
+    builder.add_node("hitl_3", hitl_3_node)
     builder.add_node("apply_patch", apply_patch_node)
     builder.add_node("test_runner", test_runner_node)
     builder.add_node("debugger", debugger_node)
     builder.add_node("fix_patch", fix_patch_node)
     builder.add_node("rollback", rollback_node)
     builder.add_node("max_verification_failure", max_verification_failure_node)
+    builder.add_node("max_revisions_failure", max_revisions_failure_node)
     builder.add_node("pr_summarizer", pr_summarizer_node)
 
     builder.add_edge(START, "planner")
@@ -115,6 +148,7 @@ def build_graph() -> StateGraph:
     builder.add_edge("hitl_2", "code_modifier")
     builder.add_edge("pr_summarizer", END)
     builder.add_edge("max_verification_failure", END)
+    builder.add_edge("max_revisions_failure", END)
 
     builder.add_conditional_edges(
         "code_modifier",
@@ -124,7 +158,26 @@ def build_graph() -> StateGraph:
     builder.add_conditional_edges(
         "validate_patch",
         route_after_validate_patch,
-        {"apply_patch": "apply_patch", "end": END},
+        {
+            "diff_reviewer": "diff_reviewer",
+            "apply_patch": "apply_patch",
+            "end": END,
+        },
+    )
+    builder.add_conditional_edges(
+        "diff_reviewer",
+        route_after_diff_reviewer,
+        {"hitl_3": "hitl_3", "end": END},
+    )
+    builder.add_conditional_edges(
+        "hitl_3",
+        route_after_hitl_3,
+        {
+            "apply_patch": "apply_patch",
+            "code_modifier": "code_modifier",
+            "max_revisions_failure": "max_revisions_failure",
+            "end": END,
+        },
     )
     builder.add_conditional_edges(
         "apply_patch",
@@ -198,7 +251,7 @@ async def get_compiled_graph() -> CompiledStateGraph:
         builder = build_graph()
         _compiled_graph = builder.compile(
             checkpointer=checkpointer,
-            interrupt_before=["hitl_1", "hitl_2"],
+            interrupt_before=["hitl_1", "hitl_2", "hitl_3"],
         )
         logger.info("[graph] StateGraph compiled successfully")
     return _compiled_graph

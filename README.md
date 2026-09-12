@@ -2,7 +2,7 @@
 
 **A multi-agent software engineering teammate.**
 
-Give Prism a GitHub repository and an issue. It reads the codebase, breaks the work into subtasks, finds the relevant files, writes a step-by-step implementation plan, generates a structured patch, applies it in an isolated clone, runs the real test suite, and can diagnose and repair failing tests up to three verification attempts before rolling back. You stay in control at two approval gates. Diff Reviewer / HITL #3 are not in this phase.
+Give Prism a GitHub repository and an issue. It reads the codebase, breaks the work into subtasks, finds the relevant files, writes a step-by-step implementation plan, generates a structured patch, reviews the diff, waits for your approval, applies it in an isolated clone, runs the real test suite, and can diagnose and repair failing tests up to three verification attempts before rolling back. You stay in control at three approval gates.
 
 Prism plans and evaluates first. It does not silently rewrite your application.
 
@@ -15,7 +15,7 @@ Prism plans and evaluates first. It does not silently rewrite your application.
 [![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20pgvector-3FCF8E?logo=supabase&logoColor=white&labelColor=0a0d08)](https://supabase.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-7C3AED?labelColor=0a0d08)](LICENSE)
 
-**[Live demo](https://prism-beta-one.vercel.app)** · **[How the graph works](GRAPH.md)** · **[Phase 4 graph](GRAPH_V2.md)** · **[Architecture](ARCHITECTURE.md)** · **[API](API.md)**
+**[Live demo](https://prism-beta-one.vercel.app)** · **[How the graph works](GRAPH.md)** · **[Phase 5 graph](GRAPH_V2.md)** · **[Architecture](ARCHITECTURE.md)** · **[API](API.md)**
 
 <p align="center">
   <img src="docs/assets/prism-workspace.png" alt="Prism workspace: left panel to start a run, center live agent stream, right tabbed Plan / Files / PR Draft / Debug output" width="100%" />
@@ -27,13 +27,13 @@ Prism plans and evaluates first. It does not silently rewrite your application.
 
 Most AI coding tools jump straight to a patch. That looks fast in a demo and is hard to trust in a real repo.
 
-Prism is built around a different thesis: **engineering judgment is the product.** A senior engineer does not start by writing code. They decompose the issue, locate the files that matter, plan the change, run tests, and only then describe the work in a pull request. Prism automates that loop — and pauses twice so a human can edit or stop the plan before anything expensive runs.
+Prism is built around a different thesis: **engineering judgment is the product.** A senior engineer does not start by writing code. They decompose the issue, locate the files that matter, plan the change, run tests, and only then describe the work in a pull request. Prism automates that loop — and pauses at three gates so a human can edit the plan, approve the reviewed diff, or stop before anything expensive is applied.
 
 That makes this repo useful in two ways:
 
 | If you are… | What to look at |
 | --- | --- |
-| A recruiter or hiring manager | The live demo, the Phase 4 pipeline below, and the tech stack. This is an end-to-end AI systems project, not a chatbot wrapper. |
+| A recruiter or hiring manager | The live demo, the Phase 5 pipeline below, and the tech stack. This is an end-to-end AI systems project, not a chatbot wrapper. |
 | An engineer reviewing the code | Deterministic LangGraph routing, interrupt-based human-in-the-loop, a durable Postgres checkpointer, PAT never stored in the database, and tests that never run in the API process. |
 
 ---
@@ -45,17 +45,19 @@ That makes this repo useful in two ways:
 3. **You approve or edit** that breakdown (checkpoint 1).
 4. **Code Navigator** maps each subtask to files using pgvector semantic search plus the GitHub API.
 5. **Implementation Planner** writes a step-by-step plan: what to change, where, why, and the tradeoffs. It does not generate application code.
-6. **You approve or revise** that plan (checkpoint 2). This is the last human gate in Phase 4.
-7. **Code Modifier** generates a structured patch. **Validate** then **Apply** run it in an isolated clone at `baseline_sha` (not the Prism checkout).
-8. **Test Runner** reconstructs that applied workspace and runs pytest. Passing tests mark the patch `VERIFIED` but do **not** mark the session `SUCCESS`.
-9. If tests fail, **Debugger** may propose a focused fix (`fix_patch`) that is validated and applied without HITL #3. Maximum **three** Test Runner attempts. A third failure rolls back to `baseline_sha` (`FAILED_MAX_VERIFICATION`). Environment/infra failures end the run without Debugger.
-10. **PR Summarizer** writes a professional PR body from the pipeline. Optionally, Prism opens a real GitHub PR with a `PRISM_REPORT.md` on a `prism/<run_id>` branch.
+6. **You approve or revise** that plan (checkpoint 2).
+7. **Code Modifier** generates a structured patch. **Validate** checks it, then **Diff Reviewer** produces an independent review (`APPROVE` | `REQUEST_CHANGES`).
+8. **You approve, request changes (max 2 revisions), or stop** the reviewed diff (checkpoint 3). Only Approve reaches Apply for initial patches.
+9. **Apply** materializes the approved patch in an isolated clone at `baseline_sha` (not the Prism checkout).
+10. **Test Runner** reconstructs that applied workspace and runs pytest. Passing tests mark the patch `VERIFIED` but do **not** mark the session `SUCCESS`.
+11. If tests fail, **Debugger** may propose a focused fix (`fix_patch`) that is validated and applied **without** HITL #3. Maximum **three** Test Runner attempts. A third failure rolls back to `baseline_sha` (`FAILED_MAX_VERIFICATION`). Environment/infra failures end the run without Debugger.
+12. **PR Summarizer** writes a professional PR body from the pipeline. Optionally, Prism opens a real GitHub PR with a `PRISM_REPORT.md` on a `prism/<run_id>` branch.
 
-Typical wall time for a non-trivial repo is under five minutes, not counting how long you spend at the two approval screens.
+Typical wall time for a non-trivial repo is under five minutes, not counting how long you spend at the approval screens.
 
 ---
 
-## The pipeline (Phase 4)
+## The pipeline (Phase 5)
 
 ```mermaid
 flowchart LR
@@ -64,8 +66,11 @@ flowchart LR
   B --> C[Implementation Planner]
   C --> H2[You approve the plan]
   H2 --> CM[Code Modifier]
-  CM --> V[Validate and Apply]
-  V --> D[Test Runner]
+  CM --> V[Validate]
+  V --> DR[Diff Reviewer]
+  DR --> H3[You approve the diff]
+  H3 --> AP[Apply]
+  AP --> D[Test Runner]
   D --> R{Tests}
   R -->|PASS| F[PR Summarizer]
   R -->|FAIL attempts under 3| E[Debugger then Fix Patch]
@@ -73,19 +78,20 @@ flowchart LR
   R -->|FAIL attempt 3| RB[Rollback]
 ```
 
-The product agents are Planner, Code Navigator, Implementation Planner, Code Modifier, Test Runner, Debugger, and PR Summarizer. `fix_patch` is Debugger recovery, not a ninth agent. Diff Reviewer and HITL #3 are not implemented. See [GRAPH_V2.md](GRAPH_V2.md).
+Debugger-origin patches skip Diff Reviewer and HITL #3 after validate. See [GRAPH_V2.md](GRAPH_V2.md).
 
 | Agent | Job | LLM-heavy? |
 | --- | --- | --- |
 | **Planner** | Turns the issue + repo tree into ordered subtasks with dependencies, file hints, and complexity. | Yes |
 | **Code Navigator** | Finds the files that actually matter. Semantic search over cached embeddings, plus GitHub path/keyword matching. | No — tools first |
 | **Implementation Planner** | Writes an engineering plan per subtask: file, symbol, change, rationale, tradeoffs. | Yes |
-| **Code Modifier** | Generates a structured patch from the approved plan. Does not apply it to the Prism checkout. | Yes |
+| **Code Modifier** | Generates a structured patch from the approved plan (and revision feedback when HITL #3 requests changes). | Yes |
+| **Diff Reviewer** | Independent review of the validated patch before human approval. Does not apply code. | Yes |
 | **Test Runner** | Reconstructs the applied workspace and runs pytest (Modal in production, isolated local clone in dev). | No |
 | **Debugger** | Only if tests fail with attempts remaining. Symptom → root cause → targeted fix; Fix Patch applies a cumulative diff. | Yes |
 | **PR Summarizer** | Composes title, what/why, test notes, limitations, and a review checklist. | Yes |
 
-Two extra graph nodes — `hitl_1` and `hitl_2` — are not agents. They are **LangGraph interrupts**. The pipeline literally pauses, the UI shows an approval card, and FastAPI resumes the same `run_id` from a Postgres-backed checkpointer. That is required because the API runs on serverless Modal workers that do not keep memory between HTTP requests.
+Three interrupt nodes — `hitl_1`, `hitl_2`, and `hitl_3` — are not agents. They are **LangGraph interrupts**. The pipeline pauses, the UI shows an approval card, and FastAPI resumes the same `run_id` from a Postgres-backed checkpointer. That is required because the API runs on serverless Modal workers that do not keep memory between HTTP requests.
 
 ---
 
@@ -108,7 +114,7 @@ flowchart TB
 | --- | --- |
 | **Next.js (Vercel)** | Dark three-panel workspace. Left: sessions + run form. Center: live agent stream. Right: Plan / Files / PR Draft / Debug. |
 | **FastAPI (Modal)** | Control plane. Creates a `run_id`, drives the graph, exposes status/output/approve/create-pr. |
-| **LangGraph** | Phase 4 `StateGraph`: HITL #1/#2, then Code Modifier → validate → apply → Test Runner, with an attempt-capped debug/fix loop. Single compiled graph per process. |
+| **LangGraph** | Phase 5 `StateGraph`: HITL #1/#2, Code Modifier → validate → Diff Reviewer → HITL #3 → Apply → Test Runner, with an attempt-capped debug/fix loop that bypasses HITL #3. Single compiled graph per process. |
 | **Supabase** | System of record: runs, agent outputs, HITL payloads, embedding cache, and the LangGraph checkpointer. Realtime pushes agent start/complete events to the UI. |
 | **OpenAI** | `gpt-4o-mini` for chat agents. `text-embedding-3-small` for Code Navigator. One cached factory in `backend/llm.py` — agents never instantiate their own client. |
 | **LangSmith** | Auto-traces every graph run under project `Prism`. |
@@ -150,7 +156,7 @@ These are the engineering choices a reviewer can verify in the repo:
 ```
 Prism/
 ├── backend/                 FastAPI app, graph, agents, clients
-│   ├── agents/              planner, navigator, impl planner, tests, debugger, PR, HITL
+│   ├── agents/              planner, navigator, impl planner, modifier, reviewer, tests, debugger, PR, HITL
 │   ├── graph.py             StateGraph assembly + Postgres checkpointer
 │   ├── llm.py               Single cached ChatOpenAI factory
 │   ├── routers/runs.py      start / status / output / approve / create-pr
@@ -178,7 +184,7 @@ Prism/
 | `POST` | `/api/runs/start` | Start a pipeline. Returns `run_id` immediately. |
 | `GET` | `/api/runs/{id}/status` | Polling fallback for the live UI. |
 | `GET` | `/api/runs/{id}/output` | Full artifacts (subtasks, file map, plan, tests, PR draft). |
-| `POST` | `/api/runs/{id}/approve` | Resume after HITL 1 or 2 (approve / edit / stop). |
+| `POST` | `/api/runs/{id}/approve` | Resume after HITL 1, 2, or 3 (approve / revise / stop; HITL #3 revise requires feedback). |
 | `POST` | `/api/runs/{id}/create-pr` | Open a GitHub PR from the finished draft. |
 | `DELETE` | `/api/runs/{id}` | Remove a run so the same issue can be demoed again. |
 | `GET` | `/health` | Liveness. |
