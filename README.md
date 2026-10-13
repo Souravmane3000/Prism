@@ -15,7 +15,7 @@ Prism plans and evaluates first. It does not silently rewrite your application.
 [![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20pgvector-3FCF8E?logo=supabase&logoColor=white&labelColor=0a0d08)](https://supabase.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-7C3AED?labelColor=0a0d08)](LICENSE)
 
-**[Live demo](https://prism-beta-one.vercel.app)** · **[How the graph works](GRAPH.md)** · **[Architecture](ARCHITECTURE.md)** · **[API](API.md)**
+**[Live demo](https://prism-beta-one.vercel.app)** · **[How the graph works](docs/GRAPH.md)** · **[Architecture](docs/ARCHITECTURE.md)** · **[API](docs/API.md)**
 
 <p align="center">
   <img src="docs/assets/prism-workspace.png" alt="Prism workspace: left panel to start a run, center live agent stream, right tabbed Plan / Files / PR Draft / Debug output" width="100%" />
@@ -151,15 +151,18 @@ Prism/
 ├── frontend/                Next.js workspace UI
 ├── supabase/migrations/     Schema: runs, agent_outputs, hitl_checkpoints, embeddings
 ├── tests/                   Agent, graph, API, and contract tests
-├── docs/MANUAL_TEST.md      Production click matrix before a demo
+├── docs/                    Product, architecture, graph, API, and test docs
+│   ├── PRD.md
+│   ├── ARCHITECTURE.md
+│   ├── GRAPH.md
+│   ├── API.md
+│   ├── DECISIONS.md
+│   ├── CURSOR_RULES.md
+│   ├── REVIEW_REPORT.md
+│   └── MANUAL_TEST.md       Production click matrix before a demo
 ├── .github/workflows/       pytest on push/PR to main
 ├── LICENSE                  MIT
-├── modal_app.py             Modal image, secrets, ASGI entrypoint
-├── PRD.md                   Product requirements
-├── ARCHITECTURE.md          System design
-├── GRAPH.md                 Node/edge/state spec the backend follows
-├── API.md                   HTTP contract
-└── DECISIONS.md             ADRs (LangGraph, Modal, Realtime, PAT policy, …)
+└── modal_app.py             Modal image, secrets, ASGI entrypoint
 ```
 
 ---
@@ -256,11 +259,13 @@ Point `NEXT_PUBLIC_API_BASE_URL` at the Modal web URL and `FRONTEND_ORIGIN` at t
 
 | Doc | Contents |
 | --- | --- |
-| [PRD.md](PRD.md) | Scope, user journey, success criteria |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Components, data flow, deployment topology |
-| [GRAPH.md](GRAPH.md) | Exact nodes, edges, state schema, HITL resume protocol |
-| [API.md](API.md) | Request/response contracts |
-| [DECISIONS.md](DECISIONS.md) | Why LangGraph, Modal, Realtime, per-session PAT, … |
+| [docs/PRD.md](docs/PRD.md) | Scope, user journey, success criteria |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, deployment topology |
+| [docs/GRAPH.md](docs/GRAPH.md) | Exact nodes, edges, state schema, HITL resume protocol |
+| [docs/API.md](docs/API.md) | Request/response contracts |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Why LangGraph, Modal, Realtime, per-session PAT, … |
+| [docs/CURSOR_RULES.md](docs/CURSOR_RULES.md) | Build rules for this repository |
+| [docs/REVIEW_REPORT.md](docs/REVIEW_REPORT.md) | Review notes |
 | [docs/MANUAL_TEST.md](docs/MANUAL_TEST.md) | Production click-path matrix before a demo |
 
 ---

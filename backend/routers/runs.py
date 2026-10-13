@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from github.GithubException import GithubException
 
 import backend.config  # noqa: F401 — LangSmith env before LangGraph
-from backend.config import configure_langsmith_tracing, flush_langsmith_traces
+from backend.config import configure_langsmith_tracing, flush_langsmith_traces, settings
 from backend.github_client import (
     commit_file,
     create_branch,
@@ -601,24 +601,35 @@ def _schedule_pipeline(
     FastAPI BackgroundTasks run inside the ASGI request lifecycle. Modal does
     not flush the Start Run response until that lifecycle ends, so the browser
     hits the 15s abort and never receives run_id — the Planner looks like it
-    never started. Spawn a dedicated Modal function when available; otherwise
+    never started. Spawn a dedicated Modal function in production; otherwise
     use asyncio.create_task so the 201 returns immediately.
-    """
-    try:
-        import modal
 
-        fn = modal.Function.from_name("prism", "run_pipeline")
-        fn.spawn(run_id, github_token, initial_state)
+    Development stays in-process. A logged-in Modal CLI would otherwise send
+    the run to the deployed worker, whose database login is separate from the
+    local .env and can fail before the Planner starts.
+    """
+    if settings.environment != "development":
+        try:
+            import modal
+
+            fn = modal.Function.from_name("prism", "run_pipeline")
+            fn.spawn(run_id, github_token, initial_state)
+            logger.info(
+                "[runs] Spawned Modal run_pipeline — run_id=%s resume=%s",
+                run_id,
+                initial_state is None,
+            )
+            return
+        except Exception as exc:
+            logger.warning(
+                "[runs] Modal spawn unavailable (%s) — using in-process task",
+                type(exc).__name__,
+            )
+    else:
         logger.info(
-            "[runs] Spawned Modal run_pipeline — run_id=%s resume=%s",
+            "[runs] Development — in-process pipeline run_id=%s resume=%s",
             run_id,
             initial_state is None,
-        )
-        return
-    except Exception as exc:
-        logger.warning(
-            "[runs] Modal spawn unavailable (%s) — using in-process task",
-            type(exc).__name__,
         )
 
     coro = (
