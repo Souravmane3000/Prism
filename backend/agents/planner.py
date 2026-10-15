@@ -132,7 +132,7 @@ async def planner_node(state: PrismState, config: RunnableConfig) -> dict[str, A
         await update_run_status(run_id, "running", "planner")
         await save_agent_output(run_id, "planner", {}, "start")
 
-        # ── Fetch issue body ──────────────────────────────────────────────────
+        # ── Fetch issue body 
         github_client: Github = get_github_client(github_token)
         repo = get_repo(github_client, state["repo_url"])
 
@@ -147,11 +147,11 @@ async def planner_node(state: PrismState, config: RunnableConfig) -> dict[str, A
         if not issue_body:
             raise ValueError("No issue content available — provide issue_url or issue_text")
 
-        # ── Fetch repo file tree ───────────────────────────────────────────────
+        # ── Fetch repo file tree 
         file_tree: list[str] = get_file_tree(repo)
         logger.info("[planner] File tree has %d entries", len(file_tree))
 
-        # ── Fetch README and config files for context ──────────────────────────
+        # ── Fetch README and config files for context
         readme = ""
         for candidate in _README_CANDIDATES:
             if candidate in file_tree or candidate.lower() in [p.lower() for p in file_tree]:
@@ -167,7 +167,7 @@ async def planner_node(state: PrismState, config: RunnableConfig) -> dict[str, A
                 if content:
                     config_snippets[candidate] = content
 
-        # ── Call LLM ──────────────────────────────────────────────────────────
+        # ── Call LLM 
         llm = get_llm(temperature=0.1)
         user_prompt = _build_user_prompt(issue_body, file_tree, readme, config_snippets)
         messages = [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=user_prompt)]
@@ -176,11 +176,11 @@ async def planner_node(state: PrismState, config: RunnableConfig) -> dict[str, A
         response = await llm.ainvoke(messages)
         raw_content: str = str(response.content)
 
-        # ── Parse response ─────────────────────────────────────────────────────
+        # ── Parse response 
         subtasks = _parse_subtasks(raw_content)
         logger.info("[planner] Produced %d subtasks", len(subtasks))
 
-        # ── Persist to Supabase ────────────────────────────────────────────────
+        # ── Persist to Supabase 
         output_payload: dict[str, Any] = {
             "subtasks": subtasks,
             "repo_tree_count": len(file_tree),

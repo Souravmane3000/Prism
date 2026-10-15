@@ -258,7 +258,7 @@ async def _find_files_for_subtask(
     embeddings_client = _get_embeddings_client()
     query_text = f"{subtask['title']}\n{subtask['description']}"
 
-    # ── Semantic search ───────────────────────────────────────────────────────
+    # ── Semantic search
     semantic_results: dict[str, float] = {}
     try:
         query_vector = await embeddings_client.aembed_query(query_text)
@@ -271,14 +271,14 @@ async def _find_files_for_subtask(
     except Exception as exc:
         logger.warning("[code_navigator] Semantic search failed for subtask %s: %s", subtask["id"], exc)
 
-    # ── Keyword / path matching ───────────────────────────────────────────────
+    # ── Keyword / path matching 
     keyword_results: dict[str, float] = {}
     for path in file_tree:
         score = _keyword_match_score(path, subtask)
         if score > 0.1:
             keyword_results[path] = score
 
-    # ── Merge ─────────────────────────────────────────────────────────────────
+    # ── Merge
     all_paths: set[str] = set(semantic_results) | set(keyword_results)
     entries: list[FileMapEntry] = []
     for path in all_paths:

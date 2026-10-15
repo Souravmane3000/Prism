@@ -118,7 +118,7 @@ export default function AgentCard({
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
+          <div className="flex items-center gap-2 mb-0.5 min-w-0">
             {/* Status dot */}
             <span className="relative flex items-center">
               {isRunning && (
@@ -134,7 +134,7 @@ export default function AgentCard({
             </span>
 
             <span
-              className="text-sm font-medium"
+              className="text-sm font-medium truncate min-w-0"
               style={{ color: "var(--text-primary)" }}
             >
               {AGENT_LABELS[agent] ?? agent}
@@ -143,7 +143,7 @@ export default function AgentCard({
             {/* Elapsed time */}
             {startedAt && (
               <span
-                className="flex items-center gap-0.5 text-xs ml-auto"
+                className="flex items-center gap-0.5 text-xs ml-auto flex-shrink-0 whitespace-nowrap"
                 style={{ color: "var(--text-dim)" }}
               >
                 <Clock size={10} />

@@ -11,6 +11,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { InspectorToggle } from "@/components/layout/MainLayout";
 import AgentCard from "@/components/stream/AgentCard";
 import HITLCard from "@/components/stream/HITLCard";
 import {
@@ -34,6 +35,30 @@ import type {
 const PIPELINE_AGENTS = PIPELINE_ORDER.filter(
   (a) => a !== "hitl_1" && a !== "hitl_2",
 );
+
+function StreamHeader({ countLabel = null }: { countLabel?: string | null }) {
+  return (
+    <div
+      className="flex items-center justify-between gap-3 px-5 py-3 border-b flex-shrink-0"
+      style={{ borderColor: "var(--border-dim)" }}
+    >
+      <span
+        className="text-xs font-medium uppercase tracking-wider"
+        style={{ color: "var(--text-dim)" }}
+      >
+        Agent Pipeline
+      </span>
+      <div className="flex items-center gap-3 min-w-0">
+        {countLabel && (
+          <span className="text-xs truncate" style={{ color: "var(--text-dim)" }}>
+            {countLabel}
+          </span>
+        )}
+        <InspectorToggle />
+      </div>
+    </div>
+  );
+}
 
 interface ActivityStreamProps {
   runId: string | null;
@@ -117,31 +142,34 @@ export default function ActivityStream({
 
   if (!runId) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center h-full p-8">
-        <div
-          className="text-center max-w-xs"
-          style={{ color: "var(--text-secondary)" }}
-        >
+      <div className="flex flex-col h-full">
+        <StreamHeader />
+        <div className="flex-1 flex flex-col items-center justify-center p-8">
           <div
-            className="w-12 h-12 rounded-xl mb-4 mx-auto flex items-center justify-center"
-            style={{
-              border: "1px solid var(--border-subtle)",
-              backgroundColor: "var(--bg-card)",
-            }}
+            className="text-center max-w-xs"
+            style={{ color: "var(--text-secondary)" }}
           >
-            <span
-              className="text-xl"
-              style={{ color: "var(--accent-lime)", fontWeight: 700 }}
+            <div
+              className="w-12 h-12 rounded-xl mb-4 mx-auto flex items-center justify-center"
+              style={{
+                border: "1px solid var(--border-subtle)",
+                backgroundColor: "var(--bg-card)",
+              }}
             >
-              ◈
-            </span>
+              <span
+                className="text-xl"
+                style={{ color: "var(--accent-lime)", fontWeight: 700 }}
+              >
+                ◈
+              </span>
+            </div>
+            <p className="text-base font-medium mb-1" style={{ color: "var(--text-primary)" }}>
+              No active run
+            </p>
+            <p className="text-sm">
+              Enter a repository URL and issue on the left to start the pipeline.
+            </p>
           </div>
-          <p className="text-base font-medium mb-1" style={{ color: "var(--text-primary)" }}>
-            No active run
-          </p>
-          <p className="text-sm">
-            Enter a repository URL and issue on the left to start the pipeline.
-          </p>
         </div>
       </div>
     );
@@ -220,22 +248,13 @@ export default function ActivityStream({
   return (
     <div className="flex flex-col h-full">
       {/* Stream header */}
-      <div
-        className="flex items-center justify-between px-5 py-3 border-b flex-shrink-0"
-        style={{ borderColor: "var(--border-dim)" }}
-      >
-        <span
-          className="text-xs font-medium uppercase tracking-wider"
-          style={{ color: "var(--text-dim)" }}
-        >
-          Agent Pipeline
-        </span>
-        {agentOutputs.length > 0 && (
-          <span className="text-xs" style={{ color: "var(--text-dim)" }}>
-            {completedPipelineAgents} / {PIPELINE_AGENTS.length} agents
-          </span>
-        )}
-      </div>
+      <StreamHeader
+        countLabel={
+          agentOutputs.length > 0
+            ? `${completedPipelineAgents} / ${PIPELINE_AGENTS.length} agents`
+            : null
+        }
+      />
 
       {/* Scrollable agent cards */}
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
